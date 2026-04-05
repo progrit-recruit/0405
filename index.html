@@ -855,6 +855,17 @@
       background:linear-gradient(transparent,rgba(0,0,0,.5));
       padding-top:30px;
     }
+    .demo-ar-controls {
+      display:flex; align-items:center; justify-content:center; gap:40px; width:100%;
+    }
+    .demo-ar-flip {
+      width:52px; height:52px; border-radius:50%;
+      background:rgba(255,255,255,.2); border:2px solid rgba(255,255,255,.5);
+      font-size:1.5rem; cursor:pointer; color:white;
+      display:flex; align-items:center; justify-content:center;
+      transition:transform .3s;
+    }
+    .demo-ar-flip:active { transform:scale(.88) rotate(180deg); }
     .demo-ar-shutter {
       width:74px; height:74px; border-radius:50%;
       background:white; border:5px solid rgba(255,255,255,.55);
@@ -1124,9 +1135,14 @@
       <div class="demo-ar-hint" data-i18n="demoArHint">みつはを画面に収めよう！📸</div>
     </div>
     <div class="demo-ar-bottom">
-      <button class="demo-ar-shutter" onclick="demoCapture()">📸</button>
+      <div class="demo-ar-controls">
+        <button class="demo-ar-flip" onclick="demoFlipCamera()" title="カメラ切り替え">🔄</button>
+        <button class="demo-ar-shutter" onclick="demoCapture()">📸</button>
+        <div style="width:48px"></div>
+      </div>
     </div>
     <div class="demo-ar-flash" id="demo-ar-flash"></div>
+    <canvas id="demo-ar-canvas" style="display:none"></canvas>
   </div>
 </div>
 
@@ -3413,43 +3429,72 @@ function demoSetStep(n) {
 
 function demoNext() { demoSetStep(_demoStep + 1); }
 
+let _arFacingMode = 'environment';
+
+function _startARCamera(facingMode) {
+  const video = document.getElementById('demo-ar-video');
+  if (!video) return;
+  if (video._stream) { video._stream.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
+  }).then(stream => {
+    video.srcObject = stream;
+    video._stream = stream;
+  }).catch(() => { video.style.display = 'none'; });
+}
+
 function demoLaunchAR() {
+  _arFacingMode = 'environment';
   const overlay = document.getElementById('demo-ar-overlay');
   if (!overlay) return;
   overlay.style.display = 'flex';
-  const video = document.getElementById('demo-ar-video');
   if (navigator.mediaDevices?.getUserMedia) {
-    navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-    }).then(stream => {
-      video.srcObject = stream;
-      video._stream = stream;
-    }).catch(() => {
-      video.style.display = 'none'; // カメラ不可でもみつはは表示される
-    });
+    _startARCamera(_arFacingMode);
   } else {
-    video.style.display = 'none';
+    document.getElementById('demo-ar-video').style.display = 'none';
   }
+}
+
+function demoFlipCamera() {
+  _arFacingMode = _arFacingMode === 'environment' ? 'user' : 'environment';
+  if (navigator.mediaDevices?.getUserMedia) _startARCamera(_arFacingMode);
 }
 
 function demoCapture() {
   const flash = document.getElementById('demo-ar-flash');
-  if (flash) {
-    flash.classList.add('on');
-    setTimeout(() => flash.classList.remove('on'), 200);
-  }
-  setTimeout(() => {
-    // カメラ停止
-    const video = document.getElementById('demo-ar-video');
-    if (video?._stream) {
-      video._stream.getTracks().forEach(t => t.stop());
-      video.srcObject = null;
+  const video = document.getElementById('demo-ar-video');
+  if (flash) { flash.classList.add('on'); setTimeout(() => flash.classList.remove('on'), 200); }
+
+  // canvas に映像＋キャラを合成して保存
+  try {
+    const canvas = document.getElementById('demo-ar-canvas');
+    canvas.width  = video.videoWidth  || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (video.readyState >= 2) ctx.drawImage(video, 0, 0);
+    const charImg = document.querySelector('.demo-ar-char');
+    if (charImg) {
+      const ch = canvas.height * 0.6;
+      const cw = ch * (charImg.naturalWidth / charImg.naturalHeight);
+      ctx.drawImage(charImg, (canvas.width - cw) / 2, canvas.height - ch - 60, cw, ch);
     }
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `AniGO_${Date.now()}.jpg`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, 'image/jpeg', 0.92);
+  } catch(e) {}
+
+  setTimeout(() => {
+    if (video?._stream) { video._stream.getTracks().forEach(t => t.stop()); video.srcObject = null; }
     video.style.display = '';
     const overlay = document.getElementById('demo-ar-overlay');
     if (overlay) overlay.style.display = 'none';
     demoSetStep(2);
-  }, 380);
+  }, 400);
 }
 
 function closeDemo() {
