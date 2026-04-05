@@ -1093,35 +1093,26 @@
       <div class="demo-radar-icon">📍</div>
     </div>
     <div class="demo-bubble-wrap">
-      <div class="demo-bubble">
-        近くにアニメのキャラクターがいるよ！<br>
-        <em>探してみよう！</em>
-      </div>
+      <div class="demo-bubble" data-i18n-html="demoStep0Bubble">近くにアニメのキャラクターがいるよ！<br><em>探してみよう！</em></div>
     </div>
-    <button class="demo-btn" onclick="demoNext()">発見！ →</button>
+    <button class="demo-btn" onclick="demoNext()" data-i18n="demoStep0Btn">発見！ →</button>
   </div>
 
   <!-- STEP 1: 発見 -->
   <div class="demo-step" id="demo-s1">
     <div class="demo-bubble-wrap">
-      <div class="demo-bubble">
-        みつはがいた！<br>
-        <em>カメラで写してみよう！</em>
-      </div>
+      <div class="demo-bubble" data-i18n-html="demoStep1Bubble">みつはがいた！<br><em>カメラで写してみよう！</em></div>
     </div>
-    <button class="demo-btn" onclick="demoLaunchAR()">📱 AR起動！</button>
+    <button class="demo-btn" onclick="demoLaunchAR()" data-i18n="demoStep1Btn">📱 AR起動！</button>
   </div>
 
   <!-- STEP 2: 完了 -->
   <div class="demo-step" id="demo-s2">
     <div class="demo-bubble-wrap">
       <div class="demo-sparkles" style="margin-bottom:8px">✨ 📸 ✨</div>
-      <div class="demo-bubble success">
-        実際に色々な聖地に行って<br>
-        <em>キャラクターと触れ合おう！</em>
-      </div>
+      <div class="demo-bubble success" data-i18n-html="demoStep2Bubble">実際に色々な聖地に行って<br><em>キャラクターと触れ合おう！</em></div>
     </div>
-    <button class="demo-btn demo-btn-start" onclick="closeDemo()">✨ さあ出発！</button>
+    <button class="demo-btn demo-btn-start" onclick="closeDemo()" data-i18n="demoStep2Btn">✨ さあ出発！</button>
   </div>
 
   <!-- AR デモオーバーレイ -->
@@ -1130,7 +1121,7 @@
     <div class="demo-ar-frame"></div>
     <img src="./mitsuha.png" class="demo-ar-char" alt="みつは">
     <div class="demo-ar-hint-bar">
-      <div class="demo-ar-hint">みつはを画面に収めよう！📸</div>
+      <div class="demo-ar-hint" data-i18n="demoArHint">みつはを画面に収めよう！📸</div>
     </div>
     <div class="demo-ar-bottom">
       <button class="demo-ar-shutter" onclick="demoCapture()">📸</button>
@@ -1447,6 +1438,13 @@ const I18N = {
     introNickPlaceholder:'旅人', introNextBtn:'次へ →',
     introStartBtn:'✨ 巡礼をはじめる',
     birthYearPh:'年', birthMonthPh:'月', birthDayPh:'日',
+    demoStep0Bubble:'近くにアニメのキャラクターがいるよ！<br><em>探してみよう！</em>',
+    demoStep0Btn:'発見！ →',
+    demoStep1Bubble:'みつはがいた！<br><em>カメラで写してみよう！</em>',
+    demoStep1Btn:'📱 AR起動！',
+    demoStep2Bubble:'実際に色々な聖地に行って<br><em>キャラクターと触れ合おう！</em>',
+    demoStep2Btn:'✨ さあ出発！',
+    demoArHint:'みつはを画面に収めよう！📸',
   },
   en: {
     appTitle:'AniGO', searchPlaceholder:'🔍 Search title or spot…',
@@ -1479,6 +1477,13 @@ const I18N = {
     introNickPlaceholder:'Traveler', introNextBtn:'Next →',
     introStartBtn:'✨ Start Pilgrimage',
     birthYearPh:'Year', birthMonthPh:'Month', birthDayPh:'Day',
+    demoStep0Bubble:'An anime character is nearby!<br><em>Let\'s find them!</em>',
+    demoStep0Btn:'Found! →',
+    demoStep1Bubble:'It\'s Mitsuha!<br><em>Try capturing with the camera!</em>',
+    demoStep1Btn:'📱 Launch AR!',
+    demoStep2Bubble:'Visit sacred spots around Japan<br><em>and meet your favorite characters!</em>',
+    demoStep2Btn:'✨ Let\'s Go!',
+    demoArHint:'Frame Mitsuha in the screen! 📸',
   },
   zh: {
     appTitle:'AniGO', searchPlaceholder:'🔍 搜索作品名或地点…',
@@ -1511,6 +1516,13 @@ const I18N = {
     introNickPlaceholder:'旅行者', introNextBtn:'下一步 →',
     introStartBtn:'✨ 开始巡礼',
     birthYearPh:'年', birthMonthPh:'月', birthDayPh:'日',
+    demoStep0Bubble:'附近有动漫角色哦！<br><em>快去找找看吧！</em>',
+    demoStep0Btn:'发现！ →',
+    demoStep1Bubble:'找到三叶了！<br><em>用相机拍下来吧！</em>',
+    demoStep1Btn:'📱 启动AR！',
+    demoStep2Bubble:'去各地圣地巡礼<br><em>与角色相遇吧！</em>',
+    demoStep2Btn:'✨ 出发！',
+    demoArHint:'把三叶收入画面！📸',
   },
   ko: {
     appTitle:'AniGO', searchPlaceholder:'🔍 작품명·스팟 검색…',
@@ -1543,6 +1555,13 @@ const I18N = {
     introNickPlaceholder:'여행자', introNextBtn:'다음 →',
     introStartBtn:'✨ 순례 시작',
     birthYearPh:'년', birthMonthPh:'월', birthDayPh:'일',
+    demoStep0Bubble:'근처에 애니메이션 캐릭터가 있어요！<br><em>찾아보세요！</em>',
+    demoStep0Btn:'발견！ →',
+    demoStep1Bubble:'미츠하가 있었어요！<br><em>카메라로 찍어보세요！</em>',
+    demoStep1Btn:'📱 AR 시작！',
+    demoStep2Bubble:'다양한 성지를 방문해<br><em>캐릭터와 만나보세요！</em>',
+    demoStep2Btn:'✨ 출발！',
+    demoArHint:'미츠하를 화면에 담아보세요！📸',
   },
 };
 function t(key) { return I18N[currentLang]?.[key] ?? I18N.ja[key] ?? key; }
@@ -1554,6 +1573,9 @@ function setLang(lang) {
   // Static data-i18n elements
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    el.innerHTML = t(el.dataset.i18nHtml);
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
     el.placeholder = t(el.dataset.i18nPlaceholder);
