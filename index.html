@@ -257,11 +257,40 @@
       text-shadow: 0 1px 6px rgba(0,0,0,.9); flex: 1;
     }
     #ar-hint {
-      position: absolute; bottom: 90px; left: 0; right: 0; text-align: center;
+      position: absolute; bottom: 140px; left: 0; right: 0; text-align: center;
       color: rgba(255,255,255,.85); font-size: .82rem; font-weight: 600;
       background: rgba(0,0,0,.45); padding: 10px 20px;
       transition: opacity 1.2s ease; pointer-events: none;
     }
+    #ar-bottom-bar {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+      padding: 0 40px max(env(safe-area-inset-bottom), 24px);
+      padding-top: 20px;
+      background: linear-gradient(transparent, rgba(0,0,0,.55));
+      display: flex; align-items: center; justify-content: center; gap: 44px;
+    }
+    #ar-shutter-btn {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: white; border: 5px solid rgba(255,255,255,.5);
+      font-size: 2rem; cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+      display: flex; align-items: center; justify-content: center;
+      transition: transform .15s;
+    }
+    #ar-shutter-btn:active { transform: scale(.88); }
+    #ar-flip-btn {
+      width: 50px; height: 50px; border-radius: 50%;
+      background: rgba(255,255,255,.2); border: 2px solid rgba(255,255,255,.5);
+      font-size: 1.4rem; cursor: pointer; color: white;
+      display: flex; align-items: center; justify-content: center;
+      transition: transform .3s;
+    }
+    #ar-flip-btn:active { transform: scale(.88) rotate(180deg); }
+    #ar-flash {
+      position: absolute; inset: 0; background: white; z-index: 20;
+      opacity: 0; pointer-events: none; transition: opacity .08s;
+    }
+    #ar-flash.on { opacity: 1; }
     /* ===== AR Hero Banner ===== */
     .ar-hero {
       border-radius: 18px; margin-bottom: 16px; overflow: hidden;
@@ -2644,7 +2673,13 @@ async function openARView(spotId) {
       <button id="ar-back-btn" onclick="closeARView()">← ${t('arBack')}</button>
       <div id="ar-spot-label">${anime.icon} ${spotName(spot)}</div>
     </div>
-    <div id="ar-hint">${t('arHint')}</div>`;
+    <div id="ar-hint">${t('arHint')}</div>
+    <div id="ar-bottom-bar">
+      <button id="ar-flip-btn" onclick="arFlipCamera()" title="カメラ切り替え">🔄</button>
+      <button id="ar-shutter-btn" onclick="arCapture()">📸</button>
+      <div style="width:50px"></div>
+    </div>
+    <div id="ar-flash"></div>`;
   document.body.appendChild(overlay);
 
   const video = document.getElementById('ar-video');
@@ -2701,6 +2736,50 @@ async function openARView(spotId) {
     const hint = document.getElementById('ar-hint');
     if (hint) hint.style.opacity = '0';
   }, 4000);
+}
+
+let _mainArFacingMode = 'environment';
+
+function arFlipCamera() {
+  _mainArFacingMode = _mainArFacingMode === 'environment' ? 'user' : 'environment';
+  if (!arStream) return;
+  arStream.getTracks().forEach(t => t.stop());
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: _mainArFacingMode, width:{ideal:1280}, height:{ideal:720} }
+  }).then(stream => {
+    arStream = stream;
+    const video = document.getElementById('ar-video');
+    if (video) video.srcObject = stream;
+  }).catch(() => {});
+}
+
+function _saveCanvas(canvas) {
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    // iOS対応: 新しいタブで開く
+    const a = document.createElement('a');
+    a.href = url; a.download = `AniGO_${Date.now()}.jpg`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, 'image/jpeg', 0.92);
+}
+
+function arCapture() {
+  const video  = document.getElementById('ar-video');
+  const arCnv  = document.getElementById('ar-canvas');
+  const flash  = document.getElementById('ar-flash');
+  if (flash) { flash.classList.add('on'); setTimeout(() => flash.classList.remove('on'), 200); }
+  try {
+    const out = document.createElement('canvas');
+    out.width  = video.videoWidth  || window.innerWidth;
+    out.height = video.videoHeight || window.innerHeight;
+    const ctx = out.getContext('2d');
+    if (video.readyState >= 2) ctx.drawImage(video, 0, 0, out.width, out.height);
+    ctx.drawImage(arCnv, 0, 0, out.width, out.height);
+    _saveCanvas(out);
+  } catch(e) {}
 }
 
 function closeARView() {
@@ -3465,7 +3544,6 @@ function demoCapture() {
   const video = document.getElementById('demo-ar-video');
   if (flash) { flash.classList.add('on'); setTimeout(() => flash.classList.remove('on'), 200); }
 
-  // canvas に映像＋キャラを合成して保存
   try {
     const canvas = document.getElementById('demo-ar-canvas');
     canvas.width  = video.videoWidth  || 1280;
@@ -3478,14 +3556,7 @@ function demoCapture() {
       const cw = ch * (charImg.naturalWidth / charImg.naturalHeight);
       ctx.drawImage(charImg, (canvas.width - cw) / 2, canvas.height - ch - 60, cw, ch);
     }
-    canvas.toBlob(blob => {
-      if (!blob) return;
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `AniGO_${Date.now()}.jpg`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    }, 'image/jpeg', 0.92);
+    _saveCanvas(canvas);
   } catch(e) {}
 
   setTimeout(() => {
