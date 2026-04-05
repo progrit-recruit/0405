@@ -1,0 +1,3447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>聖地巡礼AR体験ガイド</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg: #0f0e17; --surface: #1a1a2e; --surface2: #16213e; --surface3: #0d1b2a;
+      --text: #fffffe; --muted: #a7a9be; --border: rgba(255,255,255,.08);
+      --primary: #6c63ff; --gold: #ffd166; --success: #43d9ad; --danger: #ff6b6b;
+      --nav-h: 64px; --top-h: 56px;
+    }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif; }
+
+    /* ===== Layout ===== */
+    #root { height: 100%; display: flex; flex-direction: column; }
+    #top-bar {
+      height: var(--top-h); background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 16px; gap: 12px;
+      flex-shrink: 0; z-index: 100;
+    }
+    #top-bar h1 { font-size: 1rem; font-weight: 800; background: linear-gradient(135deg,#6c63ff,#ff6584); -webkit-background-clip: text; -webkit-text-fill-color: transparent; flex: 1; }
+    #lang-select {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: .75rem; padding: 4px 6px; cursor: pointer; flex-shrink: 0;
+    }
+    .screen { flex: 1; overflow-y: auto; overflow-x: hidden; display: none; }
+    .screen.active { display: flex; flex-direction: column; }
+    #map-screen { overflow: hidden; }
+
+    /* ===== Bottom Nav ===== */
+    #bottom-nav {
+      height: var(--nav-h); background: var(--surface); border-top: 1px solid var(--border);
+      display: flex; flex-shrink: 0;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .nav-btn {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 3px; background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: .68rem; font-weight: 600; transition: color .2s;
+    }
+    .nav-btn .nav-icon { font-size: 1.4rem; }
+    .nav-btn.active { color: var(--primary); }
+
+    /* ===== Search bar ===== */
+    .search-bar {
+      position: absolute; top: 12px; left: 12px; right: 56px; z-index: 500;
+      display: flex; gap: 8px;
+    }
+    .search-input {
+      flex: 1; background: rgba(26,26,46,.92); border: 1px solid var(--border);
+      border-radius: 12px; padding: 10px 14px; color: var(--text);
+      font-size: .88rem; outline: none; backdrop-filter: blur(8px);
+      min-width: 0;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--primary); }
+    .filter-btn {
+      background: rgba(26,26,46,.92); border: 1px solid var(--border);
+      border-radius: 12px; padding: 10px 14px; color: var(--text);
+      font-size: .85rem; cursor: pointer; white-space: nowrap;
+      backdrop-filter: blur(8px);
+    }
+
+    /* ===== Map ===== */
+    #map { position: absolute; inset: 0; }
+    .leaflet-container { background: #0a0f1e; }
+
+    /* Custom anime marker pins */
+    .anime-pin-wrap {
+      cursor: pointer;
+      transition: transform .18s cubic-bezier(.34,1.56,.64,1), filter .18s;
+    }
+    .anime-pin-wrap:hover { transform: scale(1.15) translateY(-2px); }
+    .anime-pin-wrap.visited { filter: drop-shadow(0 0 7px var(--apc, #fff)); }
+
+    /* ===== Filter chips (above map) ===== */
+    .filter-chips {
+      position: absolute; top: 64px; left: 0; right: 0; z-index: 500;
+      display: flex; gap: 8px; padding: 0 12px;
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .filter-chips::-webkit-scrollbar { display: none; }
+    .chip {
+      flex-shrink: 0; padding: 5px 12px; border-radius: 20px;
+      font-size: .75rem; font-weight: 700; cursor: pointer;
+      border: 2px solid transparent; transition: all .2s;
+      background: rgba(26,26,46,.88); backdrop-filter: blur(6px);
+      color: var(--muted);
+    }
+    .chip.active { color: #fff; }
+
+    /* ===== Spot bottom sheet ===== */
+    #spot-sheet {
+      position: fixed; bottom: var(--nav-h); left: 0; right: 0; z-index: 600;
+      background: var(--surface); border-radius: 20px 20px 0 0;
+      padding: 12px 20px 0; box-shadow: 0 -8px 40px rgba(0,0,0,.5);
+      transform: translateY(100%); transition: transform .35s cubic-bezier(.4,0,.2,1);
+      max-height: 80vh; display: flex; flex-direction: column;
+    }
+    #spot-sheet.open { transform: translateY(0); }
+    #sheet-content { overflow-y: auto; flex: 1; padding-bottom: 80px; }
+    .sheet-actions {
+      position: sticky; bottom: 0; background: var(--surface);
+      padding: 12px 0 20px; display: flex; gap: 10px;
+    }
+    .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 4px; margin: 0 auto 16px; }
+    .sheet-anime-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .75rem; font-weight: 700; padding: 4px 10px;
+      border-radius: 20px; margin-bottom: 10px;
+    }
+    .sheet-title { font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; }
+    .sheet-sub { font-size: .82rem; color: var(--muted); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+    .sheet-desc { font-size: .85rem; color: var(--muted); line-height: 1.65; margin-bottom: 16px; }
+    .sheet-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .meta-pill { font-size: .75rem; background: var(--surface2); padding: 4px 10px; border-radius: 8px; color: var(--muted); }
+    .btn-checkin {
+      flex: 1; padding: 13px; border-radius: 12px; border: none;
+      font-size: .95rem; font-weight: 800; cursor: pointer;
+      background: linear-gradient(135deg, var(--primary), #9d4edd); color: #fff;
+      transition: all .2s;
+    }
+    .btn-checkin:hover { opacity: .9; transform: translateY(-1px); }
+    .btn-checkin.visited { background: var(--surface2); color: var(--success); }
+    .btn-map-close {
+      padding: 13px 18px; border-radius: 12px; border: 1px solid var(--border);
+      background: none; color: var(--muted); font-size: .9rem; cursor: pointer;
+    }
+
+    /* ===== Spot image ===== */
+    .spot-img-wrap {
+      width: 100%; height: 180px; border-radius: 14px; overflow: hidden;
+      background: var(--surface2); margin-bottom: 14px; position: relative;
+    }
+    .spot-img {
+      width: 100%; height: 100%; object-fit: cover;
+      transition: opacity .4s ease;
+    }
+    .spot-img.loading { opacity: 0; }
+    .spot-img-skeleton {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 8px;
+      color: var(--muted); font-size: .8rem;
+    }
+    .skeleton-icon { font-size: 2rem; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+    .spot-img-credit {
+      position: absolute; bottom: 0; right: 0; left: 0;
+      padding: 6px 10px; font-size: .65rem; color: rgba(255,255,255,.6);
+      background: linear-gradient(transparent, rgba(0,0,0,.5));
+      text-align: right;
+    }
+    .spot-img-wrap.no-image { height: 80px; }
+    .spot-img-wrap.no-image .spot-img-skeleton { font-size: .75rem; gap: 4px; }
+    .maplink-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: .75rem; color: var(--primary); text-decoration: none;
+      background: rgba(108,99,255,.1); padding: 4px 10px;
+      border-radius: 8px; margin-bottom: 12px;
+    }
+    /* ===== Quick action row (checkin + route) ===== */
+    .sheet-quick-actions {
+      display: flex; gap: 10px; margin-bottom: 16px; align-items: flex-start;
+    }
+    .quick-checkin {
+      flex-shrink: 0; padding: 10px 14px; border-radius: 12px; border: none; cursor: pointer;
+      font-size: .82rem; font-weight: 800; white-space: nowrap;
+      background: linear-gradient(135deg, var(--primary), #9d4edd); color: #fff;
+      transition: all .2s;
+    }
+    .quick-checkin.visited { background: var(--surface2); color: var(--success); }
+    .quick-checkin:active { opacity: .8; }
+    .quick-route-wrap { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .quick-route-tabs { display: flex; gap: 4px; }
+    .qrt {
+      flex: 1; padding: 6px 2px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted); font-size: .7rem; font-weight: 600;
+      cursor: pointer; text-align: center; transition: all .15s;
+    }
+    .qrt.on { background: rgba(108,99,255,.18); color: var(--primary); border-color: var(--primary); }
+    .quick-route-btn {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      width: 100%; padding: 9px; border-radius: 10px; border: none; cursor: pointer;
+      font-size: .84rem; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, var(--primary), #9d4edd); transition: opacity .2s;
+    }
+    .quick-route-btn:active { opacity: .8; }
+    .quick-route-btn.no-loc { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+    /* 旧ルートUI (showRouteの結果表示は継続使用) */
+    .route-mode-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+    .route-mode-tab {
+      flex: 1; padding: 8px 4px; border-radius: 10px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); font-size: .78rem; font-weight: 600;
+      cursor: pointer; text-align: center; transition: all .15s;
+    }
+    .route-mode-tab.active { background: rgba(108,99,255,.18); color: var(--primary); border-color: var(--primary); }
+    .route-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 12px; border-radius: 12px; border: none; cursor: pointer;
+      font-size: .95rem; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, var(--primary), #9d4edd); margin-bottom: 12px; transition: opacity .2s;
+    }
+    .route-btn:active { opacity: .8; }
+    .route-btn.no-location { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+    #route-info {
+      position: fixed; bottom: -160px; left: 12px; right: 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 14px 16px;
+      z-index: 1100; transition: bottom .3s ease;
+      box-shadow: 0 -4px 24px rgba(0,0,0,.5);
+    }
+    #route-info.show { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+    .route-info-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .route-dest { font-size: .9rem; font-weight: 700; }
+    .route-stats { display: flex; gap: 16px; font-size: .85rem; color: var(--muted); flex-wrap: wrap; }
+    .route-transit-link {
+      display: inline-flex; align-items: center; gap: 4px; margin-top: 8px;
+      font-size: .8rem; color: var(--primary); text-decoration: none;
+      background: rgba(108,99,255,.1); padding: 5px 10px; border-radius: 8px;
+    }
+    .route-clear-btn {
+      background: none; border: 1px solid var(--border); border-radius: 8px;
+      color: var(--muted); padding: 4px 10px; cursor: pointer; font-size: .8rem;
+    }
+
+    /* ===== AR View ===== */
+    #ar-overlay {
+      position: fixed; inset: 0; z-index: 3000; background: #000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #ar-video {
+      position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    }
+    #ar-canvas {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      touch-action: none;
+    }
+    #ar-top-bar {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+      padding: 14px 16px;
+      padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      display: flex; align-items: center; gap: 10px;
+      background: linear-gradient(rgba(0,0,0,.65), transparent);
+    }
+    #ar-back-btn {
+      background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.3);
+      border-radius: 20px; color: #fff; padding: 7px 16px; font-size: .85rem;
+      cursor: pointer; flex-shrink: 0;
+    }
+    #ar-spot-label {
+      color: #fff; font-size: .88rem; font-weight: 700;
+      text-shadow: 0 1px 6px rgba(0,0,0,.9); flex: 1;
+    }
+    #ar-hint {
+      position: absolute; bottom: 90px; left: 0; right: 0; text-align: center;
+      color: rgba(255,255,255,.85); font-size: .82rem; font-weight: 600;
+      background: rgba(0,0,0,.45); padding: 10px 20px;
+      transition: opacity 1.2s ease; pointer-events: none;
+    }
+    /* ===== AR Hero Banner ===== */
+    .ar-hero {
+      border-radius: 18px; margin-bottom: 16px; overflow: hidden;
+      border: 1.5px solid var(--ar-ac, #a855f7)55;
+      position: relative;
+    }
+    .ar-hero-bg {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 60% 30%, var(--ar-ac, #a855f7)28, transparent 70%),
+                  linear-gradient(160deg, #1a0a2e 0%, #0d0d1a 100%);
+    }
+    .ar-hero-inner {
+      position: relative; display: flex; align-items: flex-end;
+      gap: 0; padding: 0 18px 18px 0; min-height: 190px;
+    }
+    .ar-hero-canvas-wrap {
+      flex-shrink: 0; width: 130px; margin-bottom: -4px; position: relative;
+    }
+    #ar-hero-canvas {
+      display: block; width: 130px; height: 190px;
+    }
+    .ar-hero-glow {
+      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 80px; height: 20px; border-radius: 50%;
+      background: var(--ar-ac, #a855f7); opacity: .35; filter: blur(8px);
+      animation: arHeroGlow 2s ease-in-out infinite;
+    }
+    @keyframes arHeroGlow {
+      0%,100% { transform: translateX(-50%) scaleX(1); opacity:.35; }
+      50%      { transform: translateX(-50%) scaleX(.7); opacity:.18; }
+    }
+    .ar-hero-info {
+      flex: 1; padding: 18px 0 4px;
+    }
+    .ar-hero-badge {
+      display: inline-block; font-size: .7rem; font-weight: 800; letter-spacing: .06em;
+      padding: 3px 10px; border-radius: 20px; margin-bottom: 8px;
+      background: var(--ar-ac, #a855f7)33; color: var(--ar-ac, #a855f7);
+      border: 1px solid var(--ar-ac, #a855f7)66;
+    }
+    .ar-hero-title { font-size: 1.08rem; font-weight: 800; color: #fff; margin-bottom: 3px; line-height: 1.3; }
+    .ar-hero-sub   { font-size: .72rem; color: rgba(255,255,255,.55); margin-bottom: 14px; }
+    .ar-hero-cta {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 13px; border-radius: 14px; border: none; cursor: pointer;
+      font-size: 1rem; font-weight: 800; color: #fff; letter-spacing: .02em;
+      background: linear-gradient(135deg, var(--ar-ac, #a855f7), #ff6584);
+      box-shadow: 0 4px 24px var(--ar-ac, #a855f7)66;
+      animation: arCtaPulse 2.4s ease-in-out infinite;
+      transition: opacity .15s;
+    }
+    .ar-hero-cta:active { opacity: .8; }
+    @keyframes arCtaPulse {
+      0%,100% { box-shadow: 0 4px 24px var(--ar-ac,#a855f7)66; }
+      50%      { box-shadow: 0 4px 40px var(--ar-ac,#a855f7)99, 0 0 70px var(--ar-ac,#a855f7)22; }
+    }
+    .ar-hero-sparkles {
+      position: absolute; top: 10px; right: 14px; font-size: 1.1rem;
+      animation: arSparkle 1.8s ease-in-out infinite;
+    }
+    @keyframes arSparkle {
+      0%,100% { opacity:1; transform:scale(1) rotate(0deg); }
+      50%      { opacity:.5; transform:scale(.8) rotate(15deg); }
+    }
+    .ar-btn { display:none; } /* 旧ボタンは非表示 */
+
+
+    /* ===== Anime screen ===== */
+    .screen-inner { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .screen-title { font-size: 1.1rem; font-weight: 800; margin-bottom: 4px; }
+    .anime-card {
+      background: var(--surface); border-radius: 16px; padding: 16px;
+      border: 1px solid var(--border); cursor: pointer; transition: all .2s;
+    }
+    .anime-card:hover { border-color: rgba(108,99,255,.4); transform: translateY(-1px); }
+    .anime-card-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .anime-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0; }
+    .anime-card-info { flex: 1; }
+    .anime-card-title { font-size: .95rem; font-weight: 800; margin-bottom: 2px; }
+    .anime-card-meta { font-size: .75rem; color: var(--muted); }
+    .anime-card-count { text-align: right; }
+    .anime-card-count .big { font-size: 1.2rem; font-weight: 800; }
+    .anime-card-count .small { font-size: .72rem; color: var(--muted); }
+    .progress-bar { height: 6px; background: var(--surface2); border-radius: 6px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 6px; transition: width .6s ease; }
+    .anime-spot-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; display: none; }
+    .anime-card.expanded .anime-spot-list { display: flex; }
+    .spot-row {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      background: var(--surface2); border-radius: 10px; cursor: pointer;
+      transition: all .15s;
+    }
+    .spot-row:hover { background: var(--surface3); }
+    .spot-check { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); display: flex; align-items: center; justify-content: center; font-size: .7rem; flex-shrink: 0; }
+    .spot-check.done { background: var(--success); border-color: var(--success); color: #fff; }
+    .spot-row-name { flex: 1; font-size: .84rem; font-weight: 600; }
+    .spot-row-pref { font-size: .72rem; color: var(--muted); }
+    .diff-stars { font-size: .7rem; letter-spacing: -1px; }
+
+    /* ===== Checkin screen ===== */
+    .stats-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 16px; }
+    .stat-card { background: var(--surface); border-radius: 14px; padding: 14px 10px; text-align: center; border: 1px solid var(--border); }
+    .stat-val { font-size: 1.6rem; font-weight: 800; }
+    .stat-key { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+    .total-progress { background: var(--surface); border-radius: 14px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border); }
+    .section-title { font-size: .85rem; font-weight: 700; color: var(--muted); margin-bottom: 12px; letter-spacing: .05em; }
+    .badges-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 16px; }
+    .badge-card { background: var(--surface); border-radius: 12px; padding: 12px 8px; text-align: center; border: 1px solid var(--border); }
+    .badge-card.unlocked { border-color: var(--gold); background: rgba(255,209,102,.06); }
+    .badge-card.locked { opacity: .4; }
+    .badge-icon { font-size: 1.6rem; }
+    .badge-name { font-size: .7rem; color: var(--muted); margin-top: 4px; }
+    .badge-card.unlocked .badge-name { color: var(--gold); }
+    .checkin-list { display: flex; flex-direction: column; gap: 8px; }
+    .checkin-item { background: var(--surface); border-radius: 12px; padding: 14px 16px; border: 1px solid var(--border); display: flex; gap: 12px; align-items: center; }
+    .checkin-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .checkin-info { flex: 1; }
+    .checkin-spot { font-size: .88rem; font-weight: 700; }
+    .checkin-anime { font-size: .75rem; color: var(--muted); margin-top: 1px; }
+    .checkin-time { font-size: .72rem; color: var(--muted); flex-shrink: 0; }
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-state .e-icon { font-size: 3rem; margin-bottom: 12px; }
+    .empty-state p { font-size: .9rem; line-height: 1.6; }
+
+    /* Overlay backdrop */
+    #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 590; display: none; }
+    #overlay.show { display: block; }
+
+    /* Popup animation */
+    @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .anim-in { animation: fadeUp .3s ease; }
+
+    /* ===== Anime guide banner (map) ===== */
+    #anime-guide-banner {
+      position: fixed; bottom: calc(var(--nav-h) + 12px); left: 12px; right: 12px;
+      z-index: 700; display: none;
+      background: var(--surface); border-radius: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+      padding: 12px 14px;
+      flex-direction: row; align-items: center; gap: 10px;
+      animation: fadeUp .3s ease;
+    }
+    #anime-guide-banner.show { display: flex; }
+    .banner-info { flex: 1; }
+    .banner-title { font-size: .88rem; font-weight: 800; }
+    .banner-sub   { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+    .banner-btn {
+      padding: 8px 14px; border-radius: 10px; border: none;
+      font-size: .8rem; font-weight: 800; cursor: pointer; white-space: nowrap;
+      background: linear-gradient(135deg, var(--primary), #9d4edd); color: #fff;
+    }
+
+    /* ===== Anime guide modal ===== */
+    #guide-modal {
+      position: fixed; inset: 0; z-index: 900;
+      background: var(--bg);
+      display: none; flex-direction: column;
+      animation: slideIn .35s cubic-bezier(.4,0,.2,1);
+    }
+    #guide-modal.open { display: flex; }
+    @keyframes slideIn { from{transform:translateX(100%)} to{transform:translateX(0)} }
+    .guide-top {
+      height: var(--top-h); display: flex; align-items: center;
+      padding: 0 16px; gap: 12px; flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .guide-back {
+      background: none; border: none; color: var(--muted);
+      font-size: 1.4rem; cursor: pointer; padding: 4px;
+    }
+    .guide-top-title { font-size: 1rem; font-weight: 800; flex: 1; }
+    .guide-body { flex: 1; overflow-y: auto; }
+    .guide-hero {
+      padding: 20px 16px 0;
+      display: flex; align-items: center; gap: 14px; margin-bottom: 20px;
+    }
+    .guide-hero-icon { font-size: 3rem; }
+    .guide-hero-info .big { font-size: 1.2rem; font-weight: 800; }
+    .guide-hero-info .meta { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+    .guide-section-title {
+      font-size: .78rem; font-weight: 700; color: var(--muted);
+      letter-spacing: .08em; padding: 0 16px; margin-bottom: 10px;
+    }
+    .guide-spot-card {
+      margin: 0 16px 14px; background: var(--surface);
+      border-radius: 16px; border: 1px solid var(--border); overflow: hidden;
+    }
+    .guide-spot-img {
+      width: 100%; height: 160px; object-fit: cover;
+      background: var(--surface2); display: block;
+    }
+    .guide-spot-img-placeholder {
+      width: 100%; height: 100px; background: var(--surface2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; color: var(--muted);
+    }
+    .guide-spot-body { padding: 14px; }
+    .guide-spot-name { font-size: .95rem; font-weight: 800; margin-bottom: 4px; }
+    .guide-spot-scene {
+      font-size: .82rem; color: var(--primary); font-weight: 700;
+      margin-bottom: 8px; display: flex; align-items: center; gap: 5px;
+    }
+    .guide-spot-desc { font-size: .82rem; color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+    .guide-spot-footer {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .guide-spot-pref { font-size: .75rem; color: var(--muted); }
+    .guide-jump-btn {
+      font-size: .78rem; font-weight: 700; padding: 6px 12px;
+      border-radius: 8px; border: none; cursor: pointer;
+      background: rgba(108,99,255,.15); color: var(--primary);
+    }
+
+    /* ===== Intro / Splash Screen ===== */
+    #intro-screen {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #06040f;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      overflow-y: auto;
+      transition: opacity .9s ease;
+    }
+    #intro-screen.fade-out { opacity: 0; pointer-events: none; }
+    #intro-particles { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #intro-content {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center; padding: 36px 24px 40px;
+      width: 100%; max-width: 400px;
+      animation: introFadeUp 1.1s cubic-bezier(.16,1,.3,1) .2s both;
+    }
+    @keyframes introFadeUp {
+      from { opacity:0; transform:translateY(32px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .intro-emblem {
+      font-size: 3.2rem; margin-bottom: 6px;
+      animation: introFloat 3.5s ease-in-out infinite;
+      filter: drop-shadow(0 0 24px rgba(108,99,255,.8));
+    }
+    @keyframes introFloat {
+      0%,100% { transform: translateY(0) rotate(-3deg); }
+      50%      { transform: translateY(-10px) rotate(3deg); }
+    }
+    .intro-title {
+      font-size: 2.5rem; font-weight: 900; line-height: 1.05;
+      margin-bottom: 8px; letter-spacing: -.03em;
+      background: linear-gradient(135deg, #fff 0%, #c4b5fd 40%, #ff6584 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .intro-title-en {
+      font-size: .65rem; font-weight: 600; letter-spacing: .2em;
+      color: rgba(255,255,255,.32); text-transform: uppercase;
+      margin-bottom: 0;
+    }
+    .intro-line {
+      width: 60px; height: 2px; border-radius: 2px; margin: 16px auto;
+      background: linear-gradient(90deg, transparent, #6c63ff, #ff6584, transparent);
+      animation: introLinePulse 2s ease-in-out infinite;
+    }
+    @keyframes introLinePulse {
+      0%,100% { opacity:.5; transform:scaleX(1); }
+      50%      { opacity:1; transform:scaleX(1.3); }
+    }
+    /* ---- Step progress dots ---- */
+    .intro-steps {
+      display: flex; gap: 10px; margin: 0 0 28px; align-items: center;
+    }
+    .intro-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: rgba(255,255,255,.18);
+      transition: all .35s cubic-bezier(.34,1.56,.64,1);
+    }
+    .intro-dot.done { background: rgba(167,139,250,.45); }
+    .intro-dot.active {
+      background: #a78bfa; transform: scale(1.35);
+      box-shadow: 0 0 10px rgba(167,139,250,.75);
+    }
+    /* ---- Individual steps ---- */
+    .intro-step {
+      display: none; flex-direction: column; align-items: center;
+      width: 100%; max-width: 320px;
+    }
+    .intro-step.active {
+      display: flex;
+      animation: stepSlideIn .38s cubic-bezier(.16,1,.3,1) both;
+    }
+    @keyframes stepSlideIn {
+      from { opacity:0; transform:translateX(36px); }
+      to   { opacity:1; transform:translateX(0); }
+    }
+    .intro-step-label {
+      font-size: .66rem; font-weight: 700; letter-spacing: .14em;
+      color: rgba(255,255,255,.38); text-transform: uppercase;
+      margin-bottom: 12px; text-align: center;
+    }
+    /* ---- Language grid ---- */
+    .intro-lang-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%;
+    }
+    .intro-lang-btn {
+      padding: 11px 6px; border-radius: 14px; border: 1.5px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05); color: rgba(255,255,255,.6);
+      font-size: .9rem; font-weight: 700; cursor: pointer;
+      transition: all .2s; letter-spacing: .02em;
+    }
+    .intro-lang-btn:hover { background: rgba(255,255,255,.1); }
+    .intro-lang-btn.active {
+      background: rgba(108,99,255,.25); color: #fff;
+      border-color: #a78bfa;
+      box-shadow: 0 0 14px rgba(108,99,255,.4);
+    }
+    /* ---- Birthday selects ---- */
+    .intro-birth-row { display: flex; gap: 8px; width: 100%; }
+    .intro-birth-sel {
+      flex: 1; padding: 12px 6px; border-radius: 12px;
+      border: 1.5px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.07); color: #fff;
+      font-size: .88rem; font-weight: 600; cursor: pointer;
+      text-align: center; appearance: none; -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23ffffff66'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 8px center;
+      padding-right: 22px; transition: border-color .2s;
+    }
+    .intro-birth-sel:focus { outline: none; border-color: #a78bfa; }
+    .intro-birth-sel option { background: #1a0a2e; color: #fff; }
+    /* ---- Nickname input ---- */
+    .intro-nick-input {
+      width: 100%; padding: 14px 18px; border-radius: 14px;
+      border: 1.5px solid rgba(255,255,255,.15);
+      background: rgba(255,255,255,.07); color: #fff;
+      font-size: 1.05rem; font-weight: 700; text-align: center;
+      outline: none; transition: border-color .2s;
+    }
+    .intro-nick-input::placeholder { color: rgba(255,255,255,.28); font-weight: 500; }
+    .intro-nick-input:focus { border-color: #a78bfa; }
+    /* ---- Next button ---- */
+    .intro-next-btn {
+      margin-top: 20px; padding: 13px 44px; border-radius: 50px; border: none; cursor: pointer;
+      font-size: .95rem; font-weight: 800; color: #fff; letter-spacing: .05em;
+      background: linear-gradient(135deg, #6c63ff 0%, #a855f7 100%);
+      box-shadow: 0 6px 24px rgba(108,99,255,.45);
+      transition: transform .15s, box-shadow .15s;
+    }
+    .intro-next-btn:active { transform: scale(.96); }
+    /* ---- Final step elements ---- */
+    .intro-tagline {
+      font-size: .98rem; color: rgba(255,255,255,.72);
+      margin: 6px 0 20px; font-weight: 500; line-height: 1.75;
+      letter-spacing: .03em; text-align: center; max-width: 280px;
+    }
+    .intro-tagline em { font-style: normal; color: #c4b5fd; font-weight: 700; }
+    .intro-icons {
+      display: flex; gap: 10px; margin: 0 0 16px;
+      font-size: 1.35rem; flex-wrap: wrap; justify-content: center;
+      max-width: 280px;
+    }
+    .intro-icon {
+      opacity: 0;
+      animation: introIconPop .5s cubic-bezier(.34,1.56,.64,1) forwards;
+      filter: drop-shadow(0 0 8px currentColor);
+    }
+    @keyframes introIconPop {
+      from { opacity:0; transform:scale(0) rotate(-20deg); }
+      to   { opacity:1; transform:scale(1) rotate(0deg); }
+    }
+    .intro-start-btn {
+      padding: 17px 52px; border-radius: 50px; border: none; cursor: pointer;
+      font-size: 1.08rem; font-weight: 800; color: #fff; letter-spacing: .05em;
+      background: linear-gradient(135deg, #6c63ff 0%, #a855f7 50%, #ff6584 100%);
+      box-shadow: 0 8px 36px rgba(108,99,255,.55);
+      animation: introCtaPulse 2.2s ease-in-out infinite;
+      transition: transform .15s; margin-bottom: 16px;
+    }
+    .intro-start-btn:active { transform: scale(.96); }
+    @keyframes introCtaPulse {
+      0%,100% { box-shadow: 0 8px 36px rgba(108,99,255,.55); }
+      50%      { box-shadow: 0 10px 56px rgba(168,85,247,.75), 0 0 80px rgba(255,101,132,.2); }
+    }
+    .intro-stats { font-size: .7rem; color: rgba(255,255,255,.28); letter-spacing: .1em; }
+
+    /* ===== Demo / Tutorial Screen ===== */
+    #demo-screen {
+      position: fixed; inset: 0; z-index: 9998;
+      display: none; flex-direction: column;
+      align-items: center; justify-content: flex-end;
+      overflow: hidden;
+      transition: opacity .7s ease;
+    }
+    #demo-screen.fade-out { opacity: 0; pointer-events: none; }
+    .demo-city-bg {
+      position: absolute; inset: 0;
+      background: linear-gradient(170deg,
+        #b3d4f5 0%,
+        #d4eaff 30%,
+        #ffe8c8 65%,
+        #ffcba4 100%);
+    }
+    /* 雲 */
+    .demo-city-bg::before {
+      content: '';
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 160px 55px at 18% 22%, rgba(255,255,255,.85) 60%, transparent 100%),
+        radial-gradient(ellipse 110px 40px at 28% 26%, rgba(255,255,255,.7) 60%, transparent 100%),
+        radial-gradient(ellipse 200px 60px at 72% 16%, rgba(255,255,255,.8) 60%, transparent 100%),
+        radial-gradient(ellipse 130px 45px at 82% 20%, rgba(255,255,255,.65) 60%, transparent 100%),
+        radial-gradient(ellipse 90px 32px at 50% 32%, rgba(255,255,255,.55) 55%, transparent 100%);
+    }
+    /* 地面 */
+    .demo-city-bg::after {
+      content: '';
+      position: absolute; bottom: 0; left: 0; right: 0; height: 28%;
+      background: linear-gradient(180deg, transparent 0%, #4a6741 60%, #3a5232 100%);
+    }
+    #demo-city-svg { display: none; }
+
+    /* Character */
+    .demo-char-wrap {
+      position: absolute; bottom: 88px;
+      left: 50%; transform: translateX(-50%);
+      z-index: 2;
+      transition: all .7s cubic-bezier(.16,1,.3,1);
+      pointer-events: none;
+    }
+    .demo-char-img {
+      display: block; height: 310px; width: auto;
+      filter: drop-shadow(0 8px 28px rgba(108,99,255,.55));
+      transition: all .7s cubic-bezier(.16,1,.3,1);
+    }
+    /* Step 0: Mitsuha distant/blurred */
+    #demo-screen.step-0 .demo-char-wrap {
+      left: 68%; transform: translateX(-50%) scale(0.42);
+      opacity: 0.18; filter: blur(2px);
+    }
+    /* Step 1+: Revealed */
+    #demo-screen.step-1 .demo-char-wrap,
+    #demo-screen.step-2 .demo-char-wrap {
+      opacity: 1; filter: none;
+    }
+    #demo-screen.step-1 .demo-char-img {
+      animation: demoCharReveal .7s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    @keyframes demoCharReveal {
+      from { transform: scale(.55); opacity:0; }
+      to   { transform: scale(1);   opacity:1; }
+    }
+    /* Discover ping ring */
+    .demo-char-ping {
+      position: absolute; inset: -18px; border-radius: 50%;
+      border: 2.5px solid #ffd166; opacity: 0;
+    }
+    #demo-screen.step-1 .demo-char-ping {
+      animation: charPing 1.1s ease-out 3 both;
+    }
+    @keyframes charPing {
+      0%  { transform: scale(.8); opacity:1; }
+      100%{ transform: scale(1.8); opacity:0; }
+    }
+
+    /* Radar (step 0) */
+    .demo-radar-wrap {
+      position: absolute; top: 30%; left: 50%;
+      transform: translate(-50%,-50%);
+      display: none; align-items: center; justify-content: center;
+    }
+    #demo-screen.step-0 .demo-radar-wrap { display: flex; }
+    .demo-radar-ring {
+      position: absolute; border-radius: 50%;
+      border: 2px solid rgba(108,99,255,.65);
+    }
+    .r1{width:80px;height:80px;animation:radarPulse 2s ease-out infinite 0s}
+    .r2{width:80px;height:80px;animation:radarPulse 2s ease-out infinite .65s}
+    .r3{width:80px;height:80px;animation:radarPulse 2s ease-out infinite 1.3s}
+    @keyframes radarPulse {
+      0%  {transform:scale(.4);opacity:1}
+      100%{transform:scale(2.8);opacity:0}
+    }
+    .demo-radar-icon {
+      font-size:2.5rem;z-index:1;
+      animation:demoBounce 1s ease-in-out infinite;
+    }
+    @keyframes demoBounce {
+      0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)}
+    }
+
+    /* Step panels – full-screen */
+    .demo-step { display:none; position:absolute; inset:0; }
+    .demo-step.active { display:block; animation:stepFadeIn .4s ease both; }
+    @keyframes stepFadeIn { from{opacity:0} to{opacity:1} }
+
+    /* Speech bubble just above Mitsuha's head */
+    .demo-bubble-wrap {
+      position:absolute; bottom:420px; left:20px; right:20px;
+      display:flex; flex-direction:column; align-items:center; z-index:5;
+    }
+    .demo-bubble {
+      position:relative;
+      background:rgba(14,5,38,.87); backdrop-filter:blur(14px);
+      border:1.5px solid rgba(108,99,255,.38); border-radius:20px;
+      padding:18px 22px; font-size:1rem; font-weight:600; color:#fff;
+      text-align:center; line-height:1.75; width:100%; max-width:340px;
+      box-shadow:0 4px 24px rgba(0,0,0,.45);
+      animation:bubbleIn .5s cubic-bezier(.16,1,.3,1) both;
+    }
+    /* Tail pointing DOWN toward Mitsuha */
+    .demo-bubble::after {
+      content:''; position:absolute; bottom:-16px; left:50%; transform:translateX(-50%);
+      border-width:16px 13px 0; border-style:solid;
+      border-color:rgba(108,99,255,.38) transparent transparent;
+    }
+    .demo-bubble::before {
+      content:''; position:absolute; bottom:-13px; left:50%; transform:translateX(-50%);
+      border-width:13px 10px 0; border-style:solid;
+      border-color:rgba(14,5,38,.87) transparent transparent; z-index:1;
+    }
+    @keyframes bubbleIn {
+      from{opacity:0;transform:translateY(-14px)} to{opacity:1;transform:translateY(0)}
+    }
+    .demo-bubble em { font-style:normal; color:#c4b5fd; font-weight:800; }
+    .demo-bubble.success em { color:#43d9ad; }
+    /* Action button pinned to bottom of each step */
+    .demo-btn {
+      position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
+      white-space:nowrap;
+      padding:13px 38px; border-radius:50px; border:none; cursor:pointer;
+      font-size:.98rem; font-weight:800; color:#fff; letter-spacing:.04em;
+      background:linear-gradient(135deg,#6c63ff,#a855f7);
+      box-shadow:0 6px 24px rgba(108,99,255,.5);
+      transition:transform .15s;
+      animation:bubbleIn .5s cubic-bezier(.16,1,.3,1) .15s both;
+    }
+    .demo-btn:active { transform:translateX(-50%) scale(.96); }
+    .demo-btn-start {
+      background:linear-gradient(135deg,#6c63ff 0%,#a855f7 50%,#ff6584 100%);
+      animation:introCtaPulse 2.2s ease-in-out infinite;
+    }
+    .demo-sparkles {
+      font-size:1.8rem; letter-spacing:.8rem;
+      animation:sparkleFloat 2s ease-in-out infinite; margin-bottom:6px;
+    }
+    @keyframes sparkleFloat {
+      0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-8px) scale(1.1)}
+    }
+
+    /* ── Demo AR Overlay ── */
+    #demo-ar-overlay {
+      position:fixed; inset:0; z-index:10000;
+      background:#000; display:none;
+      flex-direction:column; align-items:center; justify-content:center;
+    }
+    #demo-ar-video {
+      position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+    }
+    .demo-ar-frame {
+      position:absolute; inset:0;
+      box-shadow:inset 0 0 60px rgba(108,99,255,.18);
+      pointer-events:none;
+    }
+    .demo-ar-frame::before,.demo-ar-frame::after {
+      content:''; position:absolute; width:44px; height:44px; border-color:#a78bfa; border-style:solid;
+    }
+    .demo-ar-frame::before { top:20px; left:20px; border-width:3px 0 0 3px; }
+    .demo-ar-frame::after  { bottom:20px; right:20px; border-width:0 3px 3px 0; }
+    .demo-ar-char {
+      position:absolute; bottom:110px; left:50%;
+      transform:translateX(-50%);
+      height:250px; width:auto;
+      filter:drop-shadow(0 0 22px rgba(108,99,255,.65));
+      animation:arCharFloat 2.5s ease-in-out infinite;
+    }
+    @keyframes arCharFloat {
+      0%,100%{transform:translateX(-50%) translateY(0)} 50%{transform:translateX(-50%) translateY(-12px)}
+    }
+    .demo-ar-hint-bar {
+      position:absolute; top:0; left:0; right:0;
+      padding:env(safe-area-inset-top,16px) 20px 14px;
+      background:linear-gradient(rgba(0,0,0,.5),transparent);
+      display:flex; align-items:center; justify-content:center;
+    }
+    .demo-ar-hint {
+      background:rgba(0,0,0,.55); backdrop-filter:blur(8px);
+      padding:8px 18px; border-radius:20px;
+      font-size:.88rem; color:rgba(255,255,255,.88); font-weight:600;
+    }
+    .demo-ar-bottom {
+      position:absolute; bottom:0; left:0; right:0;
+      padding:0 20px max(env(safe-area-inset-bottom),24px);
+      display:flex; flex-direction:column; align-items:center; gap:14px;
+      background:linear-gradient(transparent,rgba(0,0,0,.5));
+      padding-top:30px;
+    }
+    .demo-ar-shutter {
+      width:74px; height:74px; border-radius:50%;
+      background:white; border:5px solid rgba(255,255,255,.55);
+      font-size:2.2rem; cursor:pointer;
+      box-shadow:0 4px 20px rgba(0,0,0,.45);
+      display:flex; align-items:center; justify-content:center;
+      transition:transform .15s;
+    }
+    .demo-ar-shutter:active { transform:scale(.88); }
+    .demo-ar-flash {
+      position:absolute; inset:0; background:white;
+      opacity:0; pointer-events:none; z-index:10001;
+      transition:opacity .08s;
+    }
+    .demo-ar-flash.on { opacity:1; }
+  </style>
+</head>
+<body>
+
+<!-- ===== イントロスプラッシュ ===== -->
+<div id="intro-screen">
+  <canvas id="intro-particles"></canvas>
+  <div id="intro-content">
+    <!-- Fixed header -->
+    <div class="intro-emblem">🗾</div>
+    <h1 class="intro-title">聖地巡礼<br>AR体験ガイド</h1>
+    <div class="intro-title-en">ANIME PILGRIMAGE AR GUIDE</div>
+    <div class="intro-line"></div>
+
+    <!-- Progress dots -->
+    <div class="intro-steps">
+      <div class="intro-dot active" data-step="0"></div>
+      <div class="intro-dot" data-step="1"></div>
+      <div class="intro-dot" data-step="2"></div>
+      <div class="intro-dot" data-step="3"></div>
+    </div>
+
+    <!-- STEP 0: Language -->
+    <div class="intro-step active" id="intro-step-0">
+      <div class="intro-step-label" id="intro-lang-label">言語 / Language</div>
+      <div class="intro-lang-grid">
+        <button class="intro-lang-btn active" data-lang="ja" onclick="selectIntroLang('ja')">🇯🇵 日本語</button>
+        <button class="intro-lang-btn"        data-lang="en" onclick="selectIntroLang('en')">🇺🇸 English</button>
+        <button class="intro-lang-btn"        data-lang="zh" onclick="selectIntroLang('zh')">🇨🇳 中文</button>
+        <button class="intro-lang-btn"        data-lang="ko" onclick="selectIntroLang('ko')">🇰🇷 한국어</button>
+      </div>
+      <button class="intro-next-btn" id="intro-next-0" onclick="introNextStep()">次へ →</button>
+    </div>
+
+    <!-- STEP 1: Birthday -->
+    <div class="intro-step" id="intro-step-1">
+      <div class="intro-step-label" id="intro-birth-label">生年月日</div>
+      <div class="intro-birth-row">
+        <select class="intro-birth-sel" id="birth-year"></select>
+        <select class="intro-birth-sel" id="birth-month"></select>
+        <select class="intro-birth-sel" id="birth-day"></select>
+      </div>
+      <button class="intro-next-btn" id="intro-next-1" onclick="introNextStep()">次へ →</button>
+    </div>
+
+    <!-- STEP 2: Nickname -->
+    <div class="intro-step" id="intro-step-2">
+      <div class="intro-step-label" id="intro-nick-label">ニックネーム</div>
+      <input class="intro-nick-input" id="intro-nickname" type="text" maxlength="20" placeholder="旅人" autocomplete="off">
+      <button class="intro-next-btn" id="intro-next-2" onclick="introNextStep()">次へ →</button>
+    </div>
+
+    <!-- STEP 3: Start -->
+    <div class="intro-step" id="intro-step-3">
+      <div class="intro-icons" id="intro-icons-row"></div>
+      <p class="intro-tagline" id="intro-tagline-text">あなたの<em>聖地巡礼</em>が、いまここから始まる</p>
+      <button class="intro-start-btn" id="intro-start-btn" onclick="closeIntro()">✨ 巡礼をはじめる</button>
+      <div class="intro-stats">9 作品 &nbsp;·&nbsp; 18 聖地スポット</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== デモ / チュートリアル画面 ===== -->
+<div id="demo-screen">
+  <!-- アニメ風夜景背景 -->
+  <div class="demo-city-bg">
+    <svg id="demo-city-svg" viewBox="0 0 390 780" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="dsg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#060118"/>
+          <stop offset="30%"  stop-color="#130440"/>
+          <stop offset="60%"  stop-color="#28106a"/>
+          <stop offset="100%" stop-color="#4a20a0"/>
+        </linearGradient>
+        <radialGradient id="dmg" cx="50%" cy="50%" r="50%">
+          <stop offset="0%"   stop-color="#fff8dc" stop-opacity="1"/>
+          <stop offset="55%"  stop-color="#ffd070" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#ffd070" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="dglow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <!-- Sky -->
+      <rect width="390" height="780" fill="url(#dsg)"/>
+      <!-- Moon glow -->
+      <circle cx="318" cy="95" r="62" fill="url(#dmg)"/>
+      <circle cx="318" cy="95" r="32" fill="#fff9e0"/>
+      <circle cx="326" cy="87" r="6"  fill="#f0dfa0" opacity="0.45"/>
+      <circle cx="310" cy="103" r="3.5" fill="#f0dfa0" opacity="0.35"/>
+      <!-- Stars -->
+      <g fill="white">
+        <circle cx="18"  cy="38"  r="1.1" opacity=".85"/>
+        <circle cx="52"  cy="14"  r="1.5" opacity=".9"/>
+        <circle cx="78"  cy="58"  r="1"   opacity=".7"/>
+        <circle cx="108" cy="22"  r="1.2" opacity=".75"/>
+        <circle cx="148" cy="44"  r="1"   opacity=".8"/>
+        <circle cx="168" cy="9"   r="1.3" opacity=".65"/>
+        <circle cx="202" cy="32"  r="1"   opacity=".55"/>
+        <circle cx="228" cy="16"  r="1.5" opacity=".9"/>
+        <circle cx="252" cy="62"  r="1"   opacity=".6"/>
+        <circle cx="272" cy="28"  r="1.1" opacity=".8"/>
+        <circle cx="348" cy="48"  r="1"   opacity=".7"/>
+        <circle cx="372" cy="18"  r="1.3" opacity=".85"/>
+        <circle cx="385" cy="75"  r="1"   opacity=".6"/>
+        <circle cx="34"  cy="82"  r="1"   opacity=".5"/>
+        <circle cx="132" cy="68"  r="1.1" opacity=".7"/>
+        <circle cx="185" cy="78"  r="0.9" opacity=".6"/>
+        <circle cx="295" cy="12"  r="1"   opacity=".75"/>
+        <circle cx="42"  cy="112" r="0.8" opacity=".5"/>
+      </g>
+      <!-- Back buildings (darkest) -->
+      <g fill="#050112">
+        <rect x="-5"  y="210" width="52"  height="570"/>
+        <rect x="42"  y="270" width="38"  height="510"/>
+        <rect x="74"  y="155" width="44"  height="625"/>
+        <rect x="91"  y="135" width="5"   height="28"/><!-- antenna -->
+        <rect x="112" y="245" width="58"  height="535"/>
+        <rect x="164" y="195" width="46"  height="585"/>
+        <rect x="205" y="260" width="52"  height="520"/>
+        <rect x="252" y="172" width="62"  height="608"/>
+        <rect x="271" y="152" width="5"   height="28"/><!-- antenna -->
+        <rect x="308" y="232" width="42"  height="548"/>
+        <rect x="344" y="205" width="52"  height="575"/>
+        <rect x="388" y="268" width="12"  height="512"/>
+      </g>
+      <!-- Mid buildings -->
+      <g fill="#0e0328">
+        <rect x="-5"  y="325" width="42"  height="455"/>
+        <rect x="32"  y="362" width="58"  height="418"/>
+        <rect x="84"  y="308" width="42"  height="472"/>
+        <polygon points="124,272 145,242 166,272"/>
+        <rect x="124" y="272" width="42"  height="508"/>
+        <rect x="160" y="345" width="52"  height="435"/>
+        <rect x="206" y="315" width="48"  height="465"/>
+        <rect x="248" y="295" width="58"  height="485"/>
+        <rect x="298" y="335" width="46"  height="445"/>
+        <rect x="338" y="305" width="42"  height="475"/>
+        <rect x="374" y="345" width="26"  height="435"/>
+      </g>
+      <!-- Front buildings -->
+      <g fill="#080218">
+        <rect x="-5"  y="428" width="58"  height="352"/>
+        <rect x="48"  y="458" width="72"  height="322"/>
+        <rect x="114" y="408" width="62"  height="372"/>
+        <rect x="170" y="445" width="82"  height="335"/>
+        <rect x="246" y="415" width="66"  height="365"/>
+        <rect x="306" y="435" width="58"  height="345"/>
+        <rect x="356" y="462" width="44"  height="318"/>
+      </g>
+      <!-- Window lights -->
+      <g>
+        <rect x="8"   y="225" width="7" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="20"  y="225" width="7" height="5" fill="#ffd166" opacity=".6"/>
+        <rect x="32"  y="225" width="7" height="5" fill="#ff9966" opacity=".7"/>
+        <rect x="8"   y="240" width="7" height="5" fill="#ffd166" opacity=".5"/>
+        <rect x="32"  y="240" width="7" height="5" fill="#ffd166" opacity=".85"/>
+        <rect x="78"  y="172" width="7" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="90"  y="172" width="7" height="5" fill="#ffd166" opacity=".55"/>
+        <rect x="102" y="172" width="7" height="5" fill="#ff9966" opacity=".7"/>
+        <rect x="78"  y="188" width="7" height="5" fill="#ff9966" opacity=".8"/>
+        <rect x="102" y="188" width="7" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="78"  y="204" width="7" height="5" fill="#ffd166" opacity=".45"/>
+        <rect x="90"  y="204" width="7" height="5" fill="#ffd166" opacity=".85"/>
+        <rect x="114" y="262" width="8" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="128" y="262" width="8" height="5" fill="#ffd166" opacity=".5"/>
+        <rect x="144" y="262" width="8" height="5" fill="#ff9966" opacity=".8"/>
+        <rect x="114" y="278" width="8" height="5" fill="#ffd166" opacity=".65"/>
+        <rect x="144" y="278" width="8" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="114" y="294" width="8" height="5" fill="#ff9966" opacity=".75"/>
+        <rect x="128" y="294" width="8" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="164" y="215" width="7" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="178" y="215" width="7" height="5" fill="#ffd166" opacity=".6"/>
+        <rect x="192" y="215" width="7" height="5" fill="#ff9966" opacity=".8"/>
+        <rect x="164" y="232" width="7" height="5" fill="#ffd166" opacity=".5"/>
+        <rect x="192" y="232" width="7" height="5" fill="#ffd166" opacity=".85"/>
+        <rect x="256" y="192" width="8" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="270" y="192" width="8" height="5" fill="#ffd166" opacity=".7"/>
+        <rect x="284" y="192" width="8" height="5" fill="#ff9966" opacity=".6"/>
+        <rect x="256" y="208" width="8" height="5" fill="#ffd166" opacity=".75"/>
+        <rect x="284" y="208" width="8" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="256" y="224" width="8" height="5" fill="#ff9966" opacity=".85"/>
+        <rect x="270" y="224" width="8" height="5" fill="#ffd166" opacity=".7"/>
+        <rect x="340" y="225" width="7" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="354" y="225" width="7" height="5" fill="#ffd166" opacity=".5"/>
+        <rect x="368" y="225" width="7" height="5" fill="#ff9966" opacity=".8"/>
+        <rect x="340" y="242" width="7" height="5" fill="#ffd166" opacity=".65"/>
+        <rect x="368" y="242" width="7" height="5" fill="#ffd166" opacity=".9"/>
+        <rect x="340" y="258" width="7" height="5" fill="#ffd166" opacity=".85"/>
+        <rect x="354" y="258" width="7" height="5" fill="#ff9966" opacity=".6"/>
+      </g>
+      <!-- Neon signs -->
+      <rect x="52"  y="432" width="32" height="11" rx="2" fill="none" stroke="#ff6b9d" stroke-width="1.5" opacity=".85"/>
+      <text x="68"  y="441" text-anchor="middle" fill="#ff6b9d" font-size="6.5" font-weight="bold" opacity=".85">ANIME</text>
+      <rect x="174" y="422" width="38" height="11" rx="2" fill="none" stroke="#a78bfa" stroke-width="1.5" opacity=".85"/>
+      <text x="193" y="431" text-anchor="middle" fill="#a78bfa" font-size="6.5" font-weight="bold" opacity=".85">聖地巡礼</text>
+      <rect x="312" y="418" width="32" height="11" rx="2" fill="none" stroke="#43d9ad" stroke-width="1.5" opacity=".85"/>
+      <text x="328" y="427" text-anchor="middle" fill="#43d9ad" font-size="6.5" font-weight="bold" opacity=".85">SEICHI</text>
+      <!-- Ground -->
+      <rect x="-5" y="700" width="400" height="90" fill="#040010"/>
+      <!-- Street lights -->
+      <line x1="82"  y1="700" x2="82"  y2="655" stroke="#777" stroke-width="2.5"/>
+      <ellipse cx="82"  cy="652" rx="16" ry="5" fill="#ffd166" opacity=".55"/>
+      <ellipse cx="82"  cy="652" rx="32" ry="22" fill="#ffd166" opacity=".08"/>
+      <line x1="308" y1="700" x2="308" y2="655" stroke="#777" stroke-width="2.5"/>
+      <ellipse cx="308" cy="652" rx="16" ry="5" fill="#ffd166" opacity=".55"/>
+      <ellipse cx="308" cy="652" rx="32" ry="22" fill="#ffd166" opacity=".08"/>
+    </svg>
+  </div>
+
+  <!-- 三葉キャラクター -->
+  <div class="demo-char-wrap" id="demo-char-wrap">
+    <img src="./mitsuha.png" class="demo-char-img" alt="みつは">
+    <div class="demo-char-ping"></div>
+  </div>
+
+  <!-- STEP 0: 探索 -->
+  <div class="demo-step active" id="demo-s0">
+    <div class="demo-radar-wrap">
+      <div class="demo-radar-ring r1"></div>
+      <div class="demo-radar-ring r2"></div>
+      <div class="demo-radar-ring r3"></div>
+      <div class="demo-radar-icon">📍</div>
+    </div>
+    <div class="demo-bubble-wrap">
+      <div class="demo-bubble">
+        近くにアニメのキャラクターがいるよ！<br>
+        <em>探してみよう！</em>
+      </div>
+    </div>
+    <button class="demo-btn" onclick="demoNext()">発見！ →</button>
+  </div>
+
+  <!-- STEP 1: 発見 -->
+  <div class="demo-step" id="demo-s1">
+    <div class="demo-bubble-wrap">
+      <div class="demo-bubble">
+        みつはがいた！<br>
+        <em>カメラで写してみよう！</em>
+      </div>
+    </div>
+    <button class="demo-btn" onclick="demoLaunchAR()">📱 AR起動！</button>
+  </div>
+
+  <!-- STEP 2: 完了 -->
+  <div class="demo-step" id="demo-s2">
+    <div class="demo-bubble-wrap">
+      <div class="demo-sparkles" style="margin-bottom:8px">✨ 📸 ✨</div>
+      <div class="demo-bubble success">
+        実際に色々な聖地に行って<br>
+        <em>キャラクターと触れ合おう！</em>
+      </div>
+    </div>
+    <button class="demo-btn demo-btn-start" onclick="closeDemo()">✨ さあ出発！</button>
+  </div>
+
+  <!-- AR デモオーバーレイ -->
+  <div id="demo-ar-overlay">
+    <video id="demo-ar-video" autoplay playsinline muted></video>
+    <div class="demo-ar-frame"></div>
+    <img src="./mitsuha.png" class="demo-ar-char" alt="みつは">
+    <div class="demo-ar-hint-bar">
+      <div class="demo-ar-hint">みつはを画面に収めよう！📸</div>
+    </div>
+    <div class="demo-ar-bottom">
+      <button class="demo-ar-shutter" onclick="demoCapture()">📸</button>
+    </div>
+    <div class="demo-ar-flash" id="demo-ar-flash"></div>
+  </div>
+</div>
+
+<div id="root">
+
+  <!-- Top bar -->
+  <div id="top-bar">
+    <h1>🗾 <span data-i18n="appTitle">聖地巡礼AR体験ガイド</span></h1>
+    <span id="visited-badge" style="font-size:.78rem;color:var(--muted)"></span>
+    <select id="lang-select" onchange="setLang(this.value)">
+      <option value="ja">🇯🇵 日本語</option>
+      <option value="en">🇺🇸 EN</option>
+      <option value="zh">🇨🇳 中文</option>
+      <option value="ko">🇰🇷 한국어</option>
+    </select>
+  </div>
+
+  <!-- Map screen -->
+  <div id="map-screen" class="screen active" style="position:relative;flex:1;">
+    <div id="map"></div>
+    <div class="search-bar">
+      <input class="search-input" id="map-search" placeholder="🔍 作品名・スポット名で検索…" type="search" data-i18n-placeholder="searchPlaceholder">
+    </div>
+    <div class="filter-chips" id="filter-chips"></div>
+  </div>
+
+  <!-- Anime screen -->
+  <div id="anime-screen" class="screen">
+    <div class="screen-inner">
+      <div class="screen-title" data-i18n="animeScreenTitle">📺 アニメ作品から探す</div>
+      <div id="anime-list"></div>
+    </div>
+  </div>
+
+  <!-- Checkin screen -->
+  <div id="checkin-screen" class="screen">
+    <div class="screen-inner">
+      <div class="screen-title" data-i18n="myScreenTitle">⭐ マイ聖地</div>
+      <div id="checkin-content"></div>
+    </div>
+  </div>
+
+  <!-- Bottom nav -->
+  <nav id="bottom-nav">
+    <button class="nav-btn active" data-screen="map-screen">
+      <span class="nav-icon">🗺️</span><span data-i18n="navMap">マップ</span>
+    </button>
+    <button class="nav-btn" data-screen="anime-screen">
+      <span class="nav-icon">📺</span><span data-i18n="navAnime">アニメ</span>
+    </button>
+    <button class="nav-btn" data-screen="checkin-screen">
+      <span class="nav-icon">⭐</span><span data-i18n="navMy">マイ聖地</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Anime guide banner (map) -->
+<div id="anime-guide-banner">
+  <div class="banner-info">
+    <div class="banner-title" id="banner-title"></div>
+    <div class="banner-sub" id="banner-sub"></div>
+  </div>
+  <button class="banner-btn" onclick="openGuideModal()" data-i18n="guideBtn">聖地ガイドを見る →</button>
+</div>
+
+<!-- Anime guide modal -->
+<div id="guide-modal">
+  <div class="guide-top">
+    <button class="guide-back" onclick="closeGuideModal()">←</button>
+    <div class="guide-top-title" id="guide-modal-title"></div>
+  </div>
+  <div class="guide-body" id="guide-body"></div>
+</div>
+
+<!-- Spot detail sheet -->
+<div id="overlay"></div>
+<div id="spot-sheet">
+  <div class="sheet-handle"></div>
+  <div id="sheet-content"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ===================== DATA =====================
+const ANIME = [
+  { id:'yourname',  title:'君の名は。',              year:2016, genre:['恋愛','SF'],      color:'#ff6b9d', icon:'🌌' },
+  { id:'koekatachi',title:'聲の形',                  year:2016, genre:['青春','恋愛'],    color:'#74b9ff', icon:'🌸' },
+  { id:'hyouka',    title:'氷菓',                    year:2012, genre:['ミステリー','青春'],color:'#ffeaa7',icon:'🌾' },
+  { id:'girlspanz', title:'ガールズ＆パンツァー',    year:2012, genre:['アクション'],     color:'#55efc4', icon:'🛡️' },
+  { id:'anohana',   title:'あの花',                  year:2011, genre:['感動','青春'],    color:'#fd79a8', icon:'🌻' },
+  { id:'yurucamp',  title:'ゆるキャン△',             year:2018, genre:['日常','アウトドア'],color:'#43d9ad',icon:'⛺' },
+  { id:'eupho',     title:'響け！ユーフォニアム',    year:2015, genre:['音楽','青春'],    color:'#ffd166', icon:'🎺' },
+  { id:'lukisuta',  title:'らき☆すた',              year:2007, genre:['日常'],           color:'#a29bfe', icon:'✨' },
+  { id:'summerwars',title:'サマーウォーズ',          year:2009, genre:['SF','家族'],      color:'#e17055', icon:'🏯' },
+];
+
+const SPOTS = [
+  // 君の名は。
+  { id:'yn1', animeId:'yourname', name:'須賀神社', officialName:'須賀神社', lat:35.6938, lng:139.7197, prefecture:'東京都', description:'瀧と三葉が再会する、映画のラストシーンで印象的な石段がある神社。新宿区須賀町の静かな場所にあります。', access:'東京メトロ四谷三丁目駅から徒歩5分', difficulty:1, wikiTitle:'須賀神社_(新宿区)', scene:'ラストシーン：大人になった瀧と三葉が石段の上で出会い、「君の名は。」と互いに呼び合う感動のクライマックス。' },
+  { id:'yn2', animeId:'yourname', name:'諏訪湖（糸守湖モデル）', officialName:'諏訪湖', lat:36.0408, lng:138.0748, prefecture:'長野県', description:'糸守湖のモデルとなった場所。湖の美しい景色が映画の世界観を彷彿とさせます。', access:'JR上諏訪駅から徒歩15分', difficulty:1, wikiTitle:'諏訪湖', scene:'物語の舞台・糸守町の中心にある隕石クレーターの湖。三葉が生きた世界の美しさが凝縮された場所。' },
+  { id:'yn3', animeId:'yourname', name:'四谷三丁目付近', officialName:'新宿区四谷3丁目', lat:35.6908, lng:139.7183, prefecture:'東京都', description:'瀧が三葉を探して歩いた新宿・四谷周辺の街並みが映画の随所に登場します。', access:'東京メトロ四谷三丁目駅すぐ', difficulty:1, wikiTitle:'四谷三丁目駅', scene:'瀧が記憶を頼りに三葉の面影を探して彷徨うシーン。都会の喧騒と孤独感が交差する重要な場面。' },
+
+  // 聲の形
+  { id:'kk1', animeId:'koekatachi', name:'大垣駅', officialName:'JR大垣駅', lat:35.3604, lng:136.6198, prefecture:'岐阜県', description:'物語の舞台となる大垣市の玄関口。作中でも印象的な場面が描かれます。', access:'JR東海道本線・大垣駅', difficulty:1, wikiTitle:'大垣駅', scene:'石田と西宮が再会した後、仲間たちと花火大会に向かう出発点。青春の終わりと始まりが交差する駅。' },
+  { id:'kk2', animeId:'koekatachi', name:'水門川遊歩道', officialName:'水門川', lat:35.3656, lng:136.6187, prefecture:'岐阜県', description:'石田と西宮が共に歩いた川沿いの遊歩道。四季折々の風景が楽しめます。', access:'大垣駅から徒歩5分', difficulty:1, wikiTitle:'大垣市', scene:'石田と西宮がゆっくり歩き、少しずつ距離を縮めていく遊歩道。桜の季節の描写が特に印象的。' },
+  { id:'kk3', animeId:'koekatachi', name:'南荒尾橋', officialName:'南荒尾橋', lat:35.3670, lng:136.6210, prefecture:'岐阜県', description:'作中の重要シーンの舞台となった橋。映画の感動が蘇る場所です。', access:'大垣駅から徒歩8分', difficulty:1, wikiTitle:'大垣城', scene:'西宮が橋の上から身を投げようとする場面。石田が間一髪で救い、二人の関係が大きく動き出す転換点。' },
+
+  // 氷菓
+  { id:'hy1', animeId:'hyouka', name:'斐太高校（神山高校モデル）', officialName:'岐阜県立斐太高校', lat:36.2421, lng:137.1089, prefecture:'岐阜県', description:'主人公たちが通う神山高校のモデル校。敷地外から雰囲気を楽しめます。', access:'JR飛騨古川駅から徒歩10分', difficulty:2, wikiTitle:'岐阜県立斐太高等学校', scene:'折木と千反田が古典部として活動する神山高校の舞台。第1話から登場し、数々の謎解きの場となった校舎。' },
+  { id:'hy2', animeId:'hyouka', name:'飛騨古川駅', officialName:'JR飛騨古川駅', lat:36.2388, lng:137.1098, prefecture:'岐阜県', description:'作中の舞台・飛騨の玄関口。レトロな雰囲気が残る駅舎が印象的。', access:'JR高山本線・飛騨古川駅', difficulty:2, wikiTitle:'飛騨古川駅', scene:'折木が帰省や外出で利用する駅。古びた駅舎の雰囲気が物語の落ち着いたトーンを体現している。' },
+
+  // ガールズ＆パンツァー
+  { id:'gp1', animeId:'girlspanz', name:'大洗磯前神社', officialName:'大洗磯前神社', lat:36.3148, lng:140.5770, prefecture:'茨城県', description:'大洗の海岸に突き出た岩礁に建つ神社。作中にも登場する大洗の象徴的スポット。', access:'鹿島臨海鉄道・大洗駅から徒歩30分またはバス', difficulty:2, wikiTitle:'大洗磯前神社', scene:'みほたちが大洗女子学園を守るため戦う決意を固めた大洗の象徴。海に向かってそびえる鳥居が作中でも印象的に描かれる。' },
+  { id:'gp2', animeId:'girlspanz', name:'大洗駅', officialName:'鹿島臨海鉄道大洗駅', lat:36.3103, lng:140.5717, prefecture:'茨城県', description:'大洗巡礼の起点となる駅。ガルパン関連のパネルやグッズが充実しています。', access:'鹿島臨海鉄道・大洗駅', difficulty:1, wikiTitle:'大洗駅', scene:'みほが転校してきた大洗女子学園のある大洗町の玄関口。現実の大洗駅もガルパン一色で聖地色が強い。' },
+
+  // あの花
+  { id:'af1', animeId:'anohana', name:'秩父駅', officialName:'秩父鉄道秩父駅', lat:35.9921, lng:139.0860, prefecture:'埼玉県', description:'物語の舞台・秩父の中心駅。駅周辺には作中に登場する場所が点在します。', access:'秩父鉄道・秩父駅', difficulty:2, wikiTitle:'秩父駅', scene:'超平和バスターズのメンバーたちが幼少期から青年期にかけて行き来した駅。めんまへの想いを抱えながら歩いたホームが印象的。' },
+  { id:'af2', animeId:'anohana', name:'秩父神社', officialName:'秩父神社', lat:35.9978, lng:139.0864, prefecture:'埼玉県', description:'作中で仲間たちが集まる神社のモデル。境内の独特の雰囲気が印象的。', access:'秩父鉄道・秩父駅から徒歩3分', difficulty:1, wikiTitle:'秩父神社', scene:'花火大会のシーンや仲間たちが集まる場面のモデルとなった神社。めんまの願いを叶えようと奮闘する場面が胸に刺さる。' },
+
+  // ゆるキャン△
+  { id:'yc1', animeId:'yurucamp', name:'本栖湖キャンプ場周辺', officialName:'本栖湖', lat:35.4685, lng:138.5834, prefecture:'山梨県', description:'リンちゃんが一人でキャンプする本栖湖。富士山の絶景と静かな湖畔が魅力。', access:'JR身延線・富士宮駅からバス', difficulty:2, wikiTitle:'本栖湖', scene:'第1話でリンがソロキャンプをする場所。湖越しに見える富士山が美しく、なでしこと初めて出会う聖地でもある。' },
+  { id:'yc2', animeId:'yurucamp', name:'身延駅', officialName:'JR身延駅', lat:35.3742, lng:138.4392, prefecture:'山梨県', description:'なでしこたちが旅行で訪れた身延山の最寄り駅。ゆるキャン聖地の拠点。', access:'JR身延線・身延駅', difficulty:2, wikiTitle:'身延駅', scene:'なでしことリンが身延山観光をする回に登場。二人がゆっくりと友情を深めていく大切なエピソードの舞台。' },
+
+  // 響け！ユーフォニアム
+  { id:'eu1', animeId:'eupho', name:'宇治橋', officialName:'宇治橋', lat:34.8897, lng:135.8021, prefecture:'京都府', description:'部活帰りに久美子たちが歩く橋。宇治川の清らかな流れと古都の雰囲気が漂います。', access:'JR宇治駅から徒歩5分', difficulty:1, wikiTitle:'宇治橋', scene:'久美子と麗奈が下校時に渡る橋。二人が音楽への想いを語り合い、特別な絆を育む場面が繰り返し描かれる。' },
+  { id:'eu2', animeId:'eupho', name:'宇治神社参道', officialName:'宇治神社', lat:34.8887, lng:135.8052, prefecture:'京都府', description:'久美子と麗奈が夜の練習をしながら歩いた参道。夕暮れ時が特に美しい。', access:'JR宇治駅から徒歩10分', difficulty:1, wikiTitle:'宇治神社', scene:'第1期の名シーン「特別になりたい」の舞台。麗奈がトランペットを吹き、久美子に本音をぶつける印象的な夜のシーン。' },
+
+  // らき☆すた
+  { id:'ls1', animeId:'lukisuta', name:'鷲宮神社', officialName:'鷲宮神社', lat:36.0833, lng:139.6666, prefecture:'埼玉県', description:'こなた一家が通う神社のモデル。聖地巡礼の先駆けとなった場所として有名。関東最古の大社の一つ。', access:'東武スカイツリーライン・鷲宮駅から徒歩15分', difficulty:2, wikiTitle:'鷲宮神社', scene:'こなた一家が毎年初詣に訪れる神社。OPや劇中でも繰り返し登場し、聖地巡礼ブームの火付け役となった歴史的な場所。' },
+
+  // サマーウォーズ
+  { id:'sw1', animeId:'summerwars', name:'上田城跡公園', officialName:'上田城跡公園', lat:36.4011, lng:138.2497, prefecture:'長野県', description:'物語の舞台・長野県上田市にある城址公園。夏の青空と城跡が映画の世界観を思い起こさせます。', access:'しなの鉄道・上田駅から徒歩10分', difficulty:1, wikiTitle:'上田城', scene:'陣内家の本拠地・長野県上田市のシンボル。終盤の決戦シーンで一族が団結して戦う姿と城の力強さが重なる。' },
+  { id:'sw2', animeId:'summerwars', name:'別所温泉', officialName:'別所温泉', lat:36.3536, lng:138.1747, prefecture:'長野県', description:'陣内家の別荘のモデルとなったエリア周辺。信州最古の温泉として知られる風光明媚な地。', access:'上田電鉄別所線・別所温泉駅', difficulty:2, wikiTitle:'別所温泉', scene:'陣内家の大きな古民家のモデル地。大勢の親戚が集まり、OZの危機に立ち向かう物語の中心舞台となった場所。' },
+];
+
+// ===================== I18N DATA: ANIME =====================
+const ANIME_I18N = {
+  yourname:   { en:{title:'Your Name.',         genre:['Romance','Sci-Fi']},   zh:{title:'你的名字。',     genre:['爱情','科幻']},    ko:{title:'너의 이름은.',      genre:['로맨스','SF']} },
+  koekatachi: { en:{title:'A Silent Voice',      genre:['Youth','Romance']},   zh:{title:'声之形',         genre:['青春','爱情']},    ko:{title:'목소리의 형태',     genre:['청춘','로맨스']} },
+  hyouka:     { en:{title:'Hyouka',              genre:['Mystery','Youth']},   zh:{title:'冰菓',           genre:['悬疑','青春']},    ko:{title:'빙과',              genre:['미스터리','청춘']} },
+  girlspanz:  { en:{title:'Girls und Panzer',    genre:['Action']},            zh:{title:'少女与战车',     genre:['动作']},           ko:{title:'걸즈 앤 판처',      genre:['액션']} },
+  anohana:    { en:{title:'AnoHana',             genre:['Drama','Youth']},     zh:{title:'那朵花',         genre:['感动','青春']},    ko:{title:'그 꽃',             genre:['감동','청춘']} },
+  yurucamp:   { en:{title:'Laid-Back Camp',      genre:['Slice of Life','Outdoor']}, zh:{title:'摇曳露营△', genre:['日常','户外']},  ko:{title:'유루캠프△',         genre:['일상','아웃도어']} },
+  eupho:      { en:{title:'Sound! Euphonium',    genre:['Music','Youth']},     zh:{title:'吹响！上低音号', genre:['音乐','青春']},   ko:{title:'울려라！유포니엄',   genre:['음악','청춘']} },
+  lukisuta:   { en:{title:'Lucky☆Star',          genre:['Slice of Life']},     zh:{title:'幸运星',         genre:['日常']},           ko:{title:'러키☆스타',         genre:['일상']} },
+  summerwars: { en:{title:'Summer Wars',         genre:['Sci-Fi','Family']},   zh:{title:'夏日大作战',     genre:['科幻','家庭']},    ko:{title:'썸머 워즈',         genre:['SF','가족']} },
+};
+
+// ===================== I18N DATA: SPOTS =====================
+const SPOT_I18N = {
+  yn1: {
+    en:{ name:'Suga Shrine', desc:"The shrine with famous stone steps where Taki and Mitsuha reunite in the film's finale. Located quietly in Shinjuku.", access:'5 min walk from Tokyo Metro Yotsuya-sanchome Sta.', scene:'The climax: grown-up Taki and Mitsuha meet on the stone steps and call each other\'s names — the emotional finale.' },
+    zh:{ name:'须贺神社', desc:'电影最终场景中泷与三叶重逢的石阶神社，位于新宿区须贺町的静谧之处。', access:'东京地铁四谷三丁目站步行5分钟', scene:'终章：成年后的泷与三叶在石阶上相遇，互相呼唤彼此的名字——感人至深的结局。' },
+    ko:{ name:'스가 신사', desc:'다키와 미츠하가 재회하는 영화의 라스트 씬, 돌계단이 있는 신사. 신주쿠구 스가초의 조용한 곳에 위치합니다.', access:'도쿄메트로 요쓰야산초메역에서 도보 5분', scene:'라스트 씬: 어른이 된 다키와 미츠하가 돌계단 위에서 만나 서로의 이름을 부르는 감동의 클라이맥스.' },
+  },
+  yn2: {
+    en:{ name:'Lake Suwa (Itomori Model)', desc:"The model for Itomori Lake. The beautiful lakeside scenery evokes the film's world.", access:'15 min walk from JR Kamisuwa Sta.', scene:"The lake at Itomori town's heart, formed by a meteor crater. Where the beauty of Mitsuha's world is concentrated." },
+    zh:{ name:'诹访湖（系守湖原型）', desc:'电影中系守湖的原型地，美丽的湖泊风景令人联想到电影世界观。', access:'JR上诹访站步行15分钟', scene:'故事舞台系守町中心的陨石坑湖泊，凝聚了三叶所生活世界之美。' },
+    ko:{ name:'스와호(이토모리 모델)', desc:'영화에서 이토모리 호수의 모델이 된 곳. 아름다운 호수 풍경이 영화의 세계관을 떠올리게 합니다.', access:'JR카미스와역에서 도보 15분', scene:'이야기 무대 이토모리 마을 중심의 운석 분화구 호수. 미츠하가 살았던 세계의 아름다움이 담긴 곳.' },
+  },
+  yn3: {
+    en:{ name:'Around Yotsuya-sanchome', desc:'Streets of Yotsuya and Shinjuku where Taki searches for Mitsuha appear throughout the film.', access:'Right at Tokyo Metro Yotsuya-sanchome Sta.', scene:"Scenes where Taki wanders searching for Mitsuha's traces from memory. Urban bustle and loneliness intersect." },
+    zh:{ name:'四谷三丁目周边', desc:'泷寻找三叶时走过的新宿・四谷街景在电影中多次出现。', access:'东京地铁四谷三丁目站即到', scene:'泷凭着记忆寻找三叶身影的场景。都市的喧嚣与孤独感交织的重要场面。' },
+    ko:{ name:'요쓰야산초메 부근', desc:'다키가 미츠하를 찾아 걸어다닌 신주쿠・요쓰야 일대의 거리가 영화 곳곳에 등장합니다.', access:'도쿄메트로 요쓰야산초메역 바로 앞', scene:'다키가 기억을 더듬어 미츠하의 흔적을 찾아 헤매는 장면. 도시의 소음과 고독감이 교차하는 중요 장면.' },
+  },
+  kk1: {
+    en:{ name:'Ogaki Station', desc:'The gateway to Ogaki City, the setting of the story. Memorable scenes from the film take place here.', access:'JR Tokaido Main Line, Ogaki Sta.', scene:"The departure point for Ishida and Nishimiya's friends heading to the fireworks festival after their reunion. Where youth's end and beginning intersect." },
+    zh:{ name:'大垣站', desc:'故事舞台大垣市的玄关口，电影中有多个令人印象深刻的场景在此发生。', access:'JR东海道本线・大垣站', scene:'石田与西宫重逢后与同伴们出发去烟火大会的起点，青春的终结与开始交汇的车站。' },
+    ko:{ name:'오가키역', desc:'이야기의 무대 오가키시의 관문. 작품 속에서도 인상적인 장면이 그려집니다.', access:'JR도카이도 본선・오가키역', scene:'이시다와 니시미야가 재회한 후 친구들과 불꽃놀이 대회로 향하는 출발점. 청춘의 끝과 시작이 교차하는 역.' },
+  },
+  kk2: {
+    en:{ name:'Suimonkawa Promenade', desc:'The riverside promenade where Ishida and Nishimiya walked together. Beautiful in every season.', access:'5 min walk from Ogaki Sta.', scene:"The promenade where they slowly walk, gradually closing the distance. The cherry blossom depiction is especially memorable." },
+    zh:{ name:'水门川游步道', desc:'石田与西宫一起散步的河边小道，四季各有不同的美景。', access:'大垣站步行5分钟', scene:'石田与西宫缓慢步行，逐渐拉近距离的游步道。樱花季节的描写尤其令人印象深刻。' },
+    ko:{ name:'스이몬가와 산책로', desc:'이시다와 니시미야가 함께 걸은 강변 산책로. 사계절 아름다운 풍경을 즐길 수 있습니다.', access:'오가키역에서 도보 5분', scene:'이시다와 니시미야가 천천히 걸으며 조금씩 거리를 좁혀가는 산책로. 벚꽃 계절의 묘사가 특히 인상적.' },
+  },
+  kk3: {
+    en:{ name:'Minami-Arao Bridge', desc:'The bridge that was the setting for an important scene in the film. A place where emotion comes flooding back.', access:'8 min walk from Ogaki Sta.', scene:"The scene where Nishimiya tries to throw herself off the bridge. Ishida saves her just in time — a pivotal turning point." },
+    zh:{ name:'南荒尾桥', desc:'电影中重要场景的舞台，令人重温电影感动的地方。', access:'大垣站步行8分钟', scene:'西宫试图从桥上跳下的场景。石田千钧一发地救下她，两人关系大幅转变的转折点。' },
+    ko:{ name:'미나미아라오 다리', desc:'작품 속 중요 장면의 무대가 된 다리. 영화의 감동이 되살아나는 장소입니다.', access:'오가키역에서 도보 8분', scene:'니시미야가 다리 위에서 몸을 던지려 하는 장면. 이시다가 아슬아슬하게 구해내며 두 사람의 관계가 크게 바뀌는 전환점.' },
+  },
+  hy1: {
+    en:{ name:'Hida High School (Kamiyama HS model)', desc:'The model school for Kamiyama High where the main characters attend. Enjoy the atmosphere from outside.', access:'10 min walk from JR Hida-Furukawa Sta.', scene:'The stage for the Classic Literature Club. Featured from episode 1 as the school building where countless mysteries were solved.' },
+    zh:{ name:'斐太高中（神山高中原型）', desc:'主角们就读的神山高中的原型校，可在校外感受其氛围。', access:'JR飞弹古川站步行10分钟', scene:'折木与千反田以古典部为中心活动的神山高中舞台。从第1话起成为无数谜题的解谜现场。' },
+    ko:{ name:'히다 고등학교(카미야마 고교 모델)', desc:'주인공들이 다니는 카미야마 고교의 모델 학교. 교외에서 분위기를 즐길 수 있습니다.', access:'JR히다후루카와역에서 도보 10분', scene:'오레키와 치탄다가 고전부로서 활동하는 무대. 1화부터 등장해 수많은 수수께끼를 풀어온 교사.' },
+  },
+  hy2: {
+    en:{ name:'Hida-Furukawa Station', desc:'The gateway to Hida, the setting of the story. An impressive retro station building.', access:'JR Takayama Main Line, Hida-Furukawa Sta.', scene:"The station Oreki uses on trips. The old building's atmosphere embodies the story's calm tone." },
+    zh:{ name:'飞弹古川站', desc:'故事舞台飞弹的玄关口，保留着复古氛围的站舍令人印象深刻。', access:'JR高山本线・飞弹古川站', scene:'折木回乡或外出时使用的车站。古旧的站舍氛围体现了故事沉静的基调。' },
+    ko:{ name:'히다후루카와역', desc:'이야기의 무대 히다의 관문. 레트로한 분위기가 남아있는 역사가 인상적.', access:'JR다카야마 본선・히다후루카와역', scene:'오레키가 귀성이나 외출 시 이용하는 역. 낡은 역사의 분위기가 이야기의 차분한 톤을 체현하고 있다.' },
+  },
+  gp1: {
+    en:{ name:'Oarai Isosaki Shrine', desc:'A shrine on a rocky reef jutting into the Oarai coast. An iconic Oarai spot appearing in the anime.', access:'30 min walk or bus from Kashima Rinkai Railway Oarai Sta.', scene:"The symbol of Oarai where Miho's team resolved to protect their school. The torii gate toward the sea is impressively depicted." },
+    zh:{ name:'大洗磯前神社', desc:'耸立在大洗海岸礁石上的神社，作中登场的大洗标志性景点。', access:'鹿岛临海铁道・大洗站步行30分钟或乘公交', scene:'美穗等人下定决心保护大洗女子学园的象征。面向大海屹立的鸟居在作中有印象深刻的描绘。' },
+    ko:{ name:'오아라이 이소사키 신사', desc:'오아라이 해안으로 돌출된 암초 위에 세워진 신사. 작중에도 등장하는 오아라이의 상징.', access:'카시마 임해철도 오아라이역에서 도보 30분 또는 버스', scene:'미호 일행이 학교를 지키기로 결의한 오아라이의 상징. 바다를 향해 선 도리이가 인상적으로 그려진다.' },
+  },
+  gp2: {
+    en:{ name:'Oarai Station', desc:'The starting point for Oarai pilgrimage. Full of Girls und Panzer panels and merchandise.', access:'Kashima Rinkai Railway, Oarai Sta.', scene:"The gateway to Oarai where Miho's school is located. The real station is packed with GuP content." },
+    zh:{ name:'大洗站', desc:'大洗巡礼的起点，站内有丰富的少女与战车相关展板和周边商品。', access:'鹿岛临海铁道・大洗站', scene:'美穗转学来的大洗女子学园所在地大洗町的玄关口，现实的大洗站也是战车道一色。' },
+    ko:{ name:'오아라이역', desc:'오아라이 순례의 기점. 걸즈 앤 판처 관련 패널과 굿즈가 풍부합니다.', access:'카시마 임해철도・오아라이역', scene:'미호가 전학온 오아라이 마치의 관문. 현실의 역도 걸즈 앤 판처 일색으로 성지 분위기가 넘친다.' },
+  },
+  af1: {
+    en:{ name:'Chichibu Station', desc:'The central station of Chichibu, the story\'s setting. Anime-related spots are scattered nearby.', access:'Chichibu Railway, Chichibu Sta.', scene:'The station Super Peace Busters members commuted through. The platform walked while carrying feelings for Menma is memorable.' },
+    zh:{ name:'秩父站', desc:'故事舞台秩父的中心站，站周边散布着作中登场的地点。', access:'秩父铁道・秩父站', scene:'超和平克星的成员们从幼年到青年时期来回经过的车站。带着对面码思念走过的月台令人印象深刻。' },
+    ko:{ name:'치치부역', desc:'이야기의 무대 치치부의 중심역. 역 주변에 작중 등장하는 장소가 흩어져 있습니다.', access:'치치부 철도・치치부역', scene:'초평화 버스터즈 멤버들이 유소년기부터 청년기까지 다니던 역. 멘마를 그리며 걷던 플랫폼이 인상적.' },
+  },
+  af2: {
+    en:{ name:'Chichibu Shrine', desc:'The model for the shrine where friends gather in the anime. The grounds have a unique, touching atmosphere.', access:'3 min walk from Chichibu Sta.', scene:"Model for the fireworks scene and gathering scenes. A place that cuts to the heart as the group strives to grant Menma's wish." },
+    zh:{ name:'秩父神社', desc:'作中同伴们聚集的神社的原型，境内独特的氛围令人印象深刻。', access:'秩父铁道・秩父站步行3分钟', scene:'烟火大会和同伴们聚集场面的原型神社，众人为实现面码的愿望而奋斗的场景令人揪心。' },
+    ko:{ name:'치치부 신사', desc:'작중 친구들이 모이는 신사의 모델. 경내의 독특한 분위기가 인상적.', access:'치치부역에서 도보 3분', scene:'불꽃놀이 장면과 친구들이 모이는 장면의 모델 신사. 멘마의 소원을 이루려 분투하는 장면이 가슴을 찌른다.' },
+  },
+  yc1: {
+    en:{ name:'Around Motosu Lake Campground', desc:'The lake where Rin solo-camps in episode 1. Famous for its spectacular Mt. Fuji view and peaceful lakeside.', access:'Bus from JR Fujinomiya Sta.', scene:'Where Rin solo-camps in episode 1. The beautiful Mt. Fuji across the lake, and the sacred spot where she first meets Nadeshiko.' },
+    zh:{ name:'本栖湖露营地周边', desc:'铃独自一人露营的本栖湖，以富士山绝景和静谧的湖畔风光著称。', access:'JR身延线・富士宫站乘巴士', scene:'第1话铃独自露营的地方。湖对岸的富士山美不胜收，也是与撫子初次相遇的圣地。' },
+    ko:{ name:'모토스호 캠프장 주변', desc:'린이 솔로캠프를 하는 모토스호. 후지산의 절경과 조용한 호반이 매력.', access:'JR후지노미야역에서 버스', scene:'제1화에서 린이 솔로캠프를 하는 곳. 호수 너머 후지산이 아름답고, 나데시코와 처음 만나는 성지이기도 하다.' },
+  },
+  yc2: {
+    en:{ name:'Minobu Station', desc:'The nearest station to Minobu-san, visited by the girls on their trip. A base for Yuru Camp pilgrimage.', access:'JR Minobu Line, Minobu Sta.', scene:"Featured in the Minobu-san sightseeing episode. The setting where Nadeshiko and Rin slowly deepen their friendship." },
+    zh:{ name:'身延站', desc:'撫子等人旅行时前往的身延山最近站，前往摇曳露营圣地的据点。', access:'JR身延线・身延站', scene:'撫子与铃参观身延山的那一话登场，两人慢慢加深友谊的重要episode的舞台。' },
+    ko:{ name:'미노부역', desc:'나데시코 일행이 여행으로 방문한 미노부산의 최근 역. 유루캠프 성지 순례의 거점.', access:'JR미노부선・미노부역', scene:'나데시코와 린이 미노부산 관광을 하는 화에 등장. 두 사람이 천천히 우정을 쌓아가는 소중한 에피소드의 무대.' },
+  },
+  eu1: {
+    en:{ name:'Uji Bridge', desc:'The bridge Kumiko and friends cross after club activities. The clear Uji River and ancient capital atmosphere are captivating.', access:'5 min walk from JR Uji Sta.', scene:'Kumiko and Reina cross this bridge going home, repeatedly sharing their feelings about music and nurturing a special bond.' },
+    zh:{ name:'宇治桥', desc:'久美子等人下部活后走过的桥，宇治川清澈的流水和古都氛围令人沉醉。', access:'JR宇治站步行5分钟', scene:'久美子与丽奈放学时经过的桥，两人反复倾诉对音乐的感情，培育特别羁绊的场所。' },
+    ko:{ name:'우지 다리', desc:'구미코 일행이 부활동 후 건너는 다리. 우지가와의 맑은 흐름과 고도의 분위기가 감돕니다.', access:'JR우지역에서 도보 5분', scene:'구미코와 레이나가 하교 시 건너는 다리. 음악에 대한 마음을 나누며 특별한 유대를 키우는 장면이 반복해서 그려진다.' },
+  },
+  eu2: {
+    en:{ name:'Uji Shrine Approach', desc:'The approach road where Kumiko and Reina practiced at night. Especially beautiful at dusk.', access:'10 min walk from JR Uji Sta.', scene:'Setting for the iconic "I want to be special" scene from Season 1. Reina plays her trumpet and pours out her true feelings to Kumiko.' },
+    zh:{ name:'宇治神社参道', desc:'久美子与丽奈夜间练习时走过的参道，黄昏时分尤为美丽。', access:'JR宇治站步行10分钟', scene:'第1期名场景"想变得特别"的舞台。丽奈吹小号，向久美子倾诉真心的印象深刻的夜景场面。' },
+    ko:{ name:'우지 신사 참도', desc:'구미코와 레이나가 밤에 연습하며 걸은 참도. 황혼 무렵이 특히 아름답다.', access:'JR우지역에서 도보 10분', scene:'1기의 명장면 "특별해지고 싶어"의 무대. 레이나가 트럼펫을 불며 구미코에게 본심을 털어놓는 인상적인 밤의 장면.' },
+  },
+  ls1: {
+    en:{ name:'Washinomiya Shrine', desc:"Model for the shrine Konata's family visits. Famous as the pioneer of anime pilgrimage. One of the oldest shrines in Kanto.", access:'15 min walk from Tobu Sky Tree Line Washinomiya Sta.', scene:"The shrine Konata's family visits every New Year. Repeatedly appears in the OP, and sparked the anime pilgrimage boom." },
+    zh:{ name:'鷲宫神社', desc:'小奈多一家前往的神社的原型，作为动漫圣地巡礼的先驱而著名。关东最古老的大社之一。', access:'东武天空树线・鷲宫站步行15分钟', scene:'小奈多一家每年初詣的神社。在OP和剧中反复登场，是引发动漫圣地巡礼热潮的历史性场所。' },
+    ko:{ name:'와시노미야 신사', desc:'코나타 가족이 다니는 신사의 모델. 성지순례 붐의 선구자로 유명. 관동 최고의 대사 중 하나.', access:'도부 스카이트리라인 와시노미야역에서 도보 15분', scene:'코나타 가족이 매년 하츠모데를 하는 신사. OP와 극중에 반복 등장하며 애니 성지순례 붐의 불을 지핀 역사적 장소.' },
+  },
+  sw1: {
+    en:{ name:'Ueda Castle Ruins Park', desc:'A castle ruins park in Ueda City, Nagano, the story\'s setting. The summer sky and ruins evoke the film\'s world.', access:'10 min walk from Shinano Railway Ueda Sta.', scene:"The symbol of Ueda City where the Jinnouchi family is based. The castle's strength resonates with the family uniting in the climactic battle." },
+    zh:{ name:'上田城迹公园', desc:'故事舞台长野县上田市的城迹公园，夏日蓝天与城迹令人回想起电影的世界观。', access:'信浓铁道・上田站步行10分钟', scene:'阵内家根据地长野县上田市的象征。终盘决战一族团结战斗的姿态与城的力量感相互呼应。' },
+    ko:{ name:'우에다 성터 공원', desc:'이야기의 무대 나가노현 우에다시에 있는 성터 공원. 여름 하늘과 성터가 영화의 세계관을 떠올리게 합니다.', access:'시나노 철도 우에다역에서 도보 10분', scene:'진노우치 가족의 본거지 나가노현 우에다시의 상징. 종반 결전에서 일족이 단결해 싸우는 모습과 성의 분위기가 겹쳐진다.' },
+  },
+  sw2: {
+    en:{ name:'Bessho Onsen', desc:"The area around the model for the Jinnouchi family's villa. Known as Shinshu's oldest hot spring, a scenic location.", access:'Ueda Electric Railway Bessho Line, Bessho-Onsen Sta.', scene:"Model for the Jinnouchi family's large traditional house. The central setting where relatives gather to face the OZ crisis together." },
+    zh:{ name:'别所温泉', desc:'以阵内家别墅为原型的区域周边，以信州最古老的温泉而著称，风光明媚。', access:'上田电铁别所线・别所温泉站', scene:'阵内家大古民家的原型地，众多亲戚聚集，面对OZ危机共同奋战的故事中心舞台。' },
+    ko:{ name:'벳쇼 온천', desc:'진노우치 가족의 별장 모델이 된 지역 주변. 신슈 최고의 온천으로 알려진 경치 좋은 곳.', access:'우에다 전철 벳쇼선・벳쇼온센역', scene:'진노우치 가족의 큰 고민가의 모델 지역. 많은 친척들이 모여 OZ의 위기에 맞서 함께 싸우는 이야기의 중심 무대.' },
+  },
+};
+
+function spotName(s)   { return (SPOT_I18N[s.id]?.[currentLang] ?? SPOT_I18N[s.id]?.ja ?? {}).name   ?? s.name; }
+function spotDesc(s)   { return (SPOT_I18N[s.id]?.[currentLang] ?? SPOT_I18N[s.id]?.ja ?? {}).desc   ?? s.description; }
+function spotAccess(s) { return (SPOT_I18N[s.id]?.[currentLang] ?? SPOT_I18N[s.id]?.ja ?? {}).access ?? s.access; }
+function spotScene(s)  { return (SPOT_I18N[s.id]?.[currentLang] ?? SPOT_I18N[s.id]?.ja ?? {}).scene  ?? s.scene; }
+function animeTitle(a) { return (ANIME_I18N[a.id]?.[currentLang] ?? ANIME_I18N[a.id]?.ja ?? {}).title ?? a.title; }
+function animeGenre(a) { return (ANIME_I18N[a.id]?.[currentLang] ?? ANIME_I18N[a.id]?.ja ?? {}).genre ?? a.genre; }
+function animeTitleSep(a) { return animeGenre(a).join(currentLang === 'ja' ? '・' : ' / '); }
+
+// ===================== STATE =====================
+let checkins = [];
+let activeFilter = null;
+let currentSpot = null;
+let map = null;
+let markers = {};
+
+function loadCheckins() {
+  try { checkins = JSON.parse(localStorage.getItem('seichi_checkins') || '[]'); }
+  catch(e) { checkins = []; }
+}
+function saveCheckins() {
+  try { localStorage.setItem('seichi_checkins', JSON.stringify(checkins)); }
+  catch(e) { console.warn('localStorage save failed'); }
+}
+function isVisited(spotId) { return checkins.some(c => c.spotId === spotId); }
+function visitedCount() { return new Set(checkins.map(c=>c.spotId)).size; }
+function animeVisitedCount(animeId) {
+  const spots = SPOTS.filter(s=>s.animeId===animeId);
+  return spots.filter(s=>isVisited(s.id)).length;
+}
+
+// ===================== I18N =====================
+let currentLang = 'ja';
+const I18N = {
+  ja: {
+    appTitle:'聖地巡礼AR体験ガイド', searchPlaceholder:'🔍 作品名・スポット名で検索…',
+    navMap:'マップ', navAnime:'アニメ', navMy:'マイ聖地',
+    animeScreenTitle:'📺 アニメ作品から探す', myScreenTitle:'⭐ マイ聖地',
+    filterAll:'すべて', guideBtn:'聖地ガイドを見る →',
+    routeFoot:'🚶 徒歩', routeCycling:'🚴 自転車', routeDriving:'🚗 車', routeTransit:'🚃 電車',
+    routeBtn:'🧭 経路案内（現在地から）', routeBtnNoLoc:'🧭 経路案内（📍で現在地を有効に）',
+    routeClear:'✕ 消す', difficulty:'難易度', visited:'✓ 訪問済み', checkin:'📍 チェックイン',
+    loadingImg:'読み込み中…', noImage:'画像なし',
+    spotList:'📍 聖地スポット一覧', seeOnMap:'マップで見る', guideTitle:'聖地ガイド',
+    statSpots:'訪問スポット', statAnime:'巡礼作品数', statRate:'制覇率',
+    totalProgress:'総進捗', spot:'スポット', badges:'🏆 バッジ', history:'📍 訪問履歴',
+    emptyHistory:'まだチェックインがありません。<br>マップからスポットを見つけてチェックインしよう！',
+    visitedBadge:(v,n)=>`${v}/${n}箇所訪問済み`,
+    bannerSub:(cnt,v)=>`${cnt}箇所の聖地 · ${v}箇所訪問済み`,
+    checkinToast:(name)=>`📍 ${name} にチェックイン！`,
+    completionToast:(icon,title)=>`🏆 ${icon} ${title} 完全制覇！`,
+    alertNoLoc:'📍ボタンで現在地を有効にしてから経路案内をご利用ください。',
+    alertRouteFail:'ルートの取得に失敗しました。インターネット接続を確認してください。',
+    transitEst:'(概算)', transitLink:'🔍 Yahoo! 乗換案内で詳細を見る',
+    approx:'約', min:'分', sceneNone:'シーン情報なし', unknown:'不明',
+    badge0:'初訪問', badge5:'5箇所達成', badge10:'10箇所達成', badgeComplete:'完全制覇',
+    yearUnit:'年', spotsUnit:'箇所の聖地',
+    arBtn:'✨ AR体験', arBack:'戻る',
+    arHint:'📱 ドラッグで移動 ／ タップで話しかける',
+    arNoCamera:'カメラへのアクセスが必要です。設定から許可してください。',
+    introLangLabel:'言語 / Language',
+    introBirthLabel:'生年月日', introNickLabel:'ニックネーム',
+    introNickPlaceholder:'旅人', introNextBtn:'次へ →',
+    introStartBtn:'✨ 巡礼をはじめる',
+    birthYearPh:'年', birthMonthPh:'月', birthDayPh:'日',
+  },
+  en: {
+    appTitle:'Anime Pilgrimage AR Guide', searchPlaceholder:'🔍 Search title or spot…',
+    navMap:'Map', navAnime:'Anime', navMy:'My List',
+    animeScreenTitle:'📺 Browse by Anime', myScreenTitle:'⭐ My Pilgrimage',
+    filterAll:'All', guideBtn:'Spot Guide →',
+    routeFoot:'🚶 Walk', routeCycling:'🚴 Bike', routeDriving:'🚗 Drive', routeTransit:'🚃 Transit',
+    routeBtn:'🧭 Navigate (from here)', routeBtnNoLoc:'🧭 Navigate (enable 📍 first)',
+    routeClear:'✕ Clear', difficulty:'Difficulty', visited:'✓ Visited', checkin:'📍 Check In',
+    loadingImg:'Loading…', noImage:'No Image',
+    spotList:'📍 Pilgrimage Spots', seeOnMap:'See on Map', guideTitle:'Spot Guide',
+    statSpots:'Spots Visited', statAnime:'Anime Explored', statRate:'Completion',
+    totalProgress:'Total Progress', spot:'spots', badges:'🏆 Badges', history:'📍 Visit History',
+    emptyHistory:'No check-ins yet.<br>Find spots on the map and check in!',
+    visitedBadge:(v,n)=>`${v}/${n} spots visited`,
+    bannerSub:(cnt,v)=>`${cnt} spots · ${v} visited`,
+    checkinToast:(name)=>`📍 Checked in at ${name}!`,
+    completionToast:(icon,title)=>`🏆 ${icon} ${title} Complete!`,
+    alertNoLoc:'Please enable your location (📍 button) to use navigation.',
+    alertRouteFail:'Failed to get route. Please check your internet connection.',
+    transitEst:'(est.)', transitLink:'🔍 Check transit details',
+    approx:'~', min:'min', sceneNone:'No scene info', unknown:'Unknown',
+    badge0:'First Visit', badge5:'5 Spots', badge10:'10 Spots', badgeComplete:'Full Clear',
+    yearUnit:'', spotsUnit:'spots',
+    arBtn:'✨ AR Experience', arBack:'Back',
+    arHint:'📱 Drag to move · Tap to chat',
+    arNoCamera:'Camera access is required. Please allow it in settings.',
+    introLangLabel:'Language',
+    introBirthLabel:'Date of Birth', introNickLabel:'Nickname',
+    introNickPlaceholder:'Traveler', introNextBtn:'Next →',
+    introStartBtn:'✨ Start Pilgrimage',
+    birthYearPh:'Year', birthMonthPh:'Month', birthDayPh:'Day',
+  },
+  zh: {
+    appTitle:'圣地巡礼AR体验指南', searchPlaceholder:'🔍 搜索作品名或地点…',
+    navMap:'地图', navAnime:'动漫', navMy:'我的',
+    animeScreenTitle:'📺 按动漫搜索', myScreenTitle:'⭐ 我的巡礼',
+    filterAll:'全部', guideBtn:'圣地指南 →',
+    routeFoot:'🚶 步行', routeCycling:'🚴 骑行', routeDriving:'🚗 驾车', routeTransit:'🚃 电车',
+    routeBtn:'🧭 路线导航（从当前位置）', routeBtnNoLoc:'🧭 路线导航（请先开启📍）',
+    routeClear:'✕ 清除', difficulty:'难度', visited:'✓ 已到访', checkin:'📍 打卡',
+    loadingImg:'加载中…', noImage:'无图片',
+    spotList:'📍 圣地列表', seeOnMap:'在地图上查看', guideTitle:'圣地指南',
+    statSpots:'到访地点', statAnime:'巡礼作品', statRate:'完成率',
+    totalProgress:'总进度', spot:'处', badges:'🏆 徽章', history:'📍 到访记录',
+    emptyHistory:'还没有打卡记录。<br>在地图上找到地点并打卡！',
+    visitedBadge:(v,n)=>`已到访 ${v}/${n} 处`,
+    bannerSub:(cnt,v)=>`${cnt}处圣地 · 已到访${v}处`,
+    checkinToast:(name)=>`📍 打卡成功：${name}！`,
+    completionToast:(icon,title)=>`🏆 ${icon} ${title} 全部完成！`,
+    alertNoLoc:'请先开启位置信息（📍按钮）再使用导航功能。',
+    alertRouteFail:'获取路线失败，请检查网络连接。',
+    transitEst:'(估算)', transitLink:'🔍 查看详细换乘信息',
+    approx:'约', min:'分钟', sceneNone:'无场景信息', unknown:'未知',
+    badge0:'首次到访', badge5:'5处达成', badge10:'10处达成', badgeComplete:'全部完成',
+    yearUnit:'年', spotsUnit:'处圣地',
+    arBtn:'✨ AR体验', arBack:'返回',
+    arHint:'📱 拖动移动 · 点击让角色说话',
+    arNoCamera:'需要相机权限，请在设置中允许。',
+    introLangLabel:'语言',
+    introBirthLabel:'出生日期', introNickLabel:'昵称',
+    introNickPlaceholder:'旅行者', introNextBtn:'下一步 →',
+    introStartBtn:'✨ 开始巡礼',
+    birthYearPh:'年', birthMonthPh:'月', birthDayPh:'日',
+  },
+  ko: {
+    appTitle:'성지순례 AR 체험 가이드', searchPlaceholder:'🔍 작품명·스팟 검색…',
+    navMap:'지도', navAnime:'애니', navMy:'내 목록',
+    animeScreenTitle:'📺 애니메이션으로 찾기', myScreenTitle:'⭐ 나의 성지',
+    filterAll:'전체', guideBtn:'성지 가이드 보기 →',
+    routeFoot:'🚶 도보', routeCycling:'🚴 자전거', routeDriving:'🚗 자동차', routeTransit:'🚃 전철',
+    routeBtn:'🧭 경로 안내（현재 위치에서）', routeBtnNoLoc:'🧭 경로 안내（📍로 위치 활성화）',
+    routeClear:'✕ 지우기', difficulty:'난이도', visited:'✓ 방문 완료', checkin:'📍 체크인',
+    loadingImg:'로딩 중…', noImage:'이미지 없음',
+    spotList:'📍 성지 스팟 목록', seeOnMap:'지도에서 보기', guideTitle:'성지 가이드',
+    statSpots:'방문 스팟', statAnime:'순례 작품수', statRate:'달성률',
+    totalProgress:'전체 진행도', spot:'스팟', badges:'🏆 배지', history:'📍 방문 기록',
+    emptyHistory:'아직 체크인이 없습니다.<br>지도에서 스팟을 찾아 체크인하세요!',
+    visitedBadge:(v,n)=>`${v}/${n}곳 방문 완료`,
+    bannerSub:(cnt,v)=>`${cnt}곳의 성지 · ${v}곳 방문 완료`,
+    checkinToast:(name)=>`📍 ${name} 체크인 완료!`,
+    completionToast:(icon,title)=>`🏆 ${icon} ${title} 완전 제패!`,
+    alertNoLoc:'📍 버튼으로 현재 위치를 활성화한 후 경로 안내를 이용하세요.',
+    alertRouteFail:'경로를 가져오지 못했습니다. 인터넷 연결을 확인해 주세요.',
+    transitEst:'(추정)', transitLink:'🔍 대중교통 상세 보기',
+    approx:'약', min:'분', sceneNone:'장면 정보 없음', unknown:'불명',
+    badge0:'첫 방문', badge5:'5곳 달성', badge10:'10곳 달성', badgeComplete:'완전 제패',
+    yearUnit:'년', spotsUnit:'곳의 성지',
+    arBtn:'✨ AR 체험', arBack:'뒤로',
+    arHint:'📱 드래그로 이동 · 탭하면 말해요',
+    arNoCamera:'카메라 접근 권한이 필요합니다. 설정에서 허용해 주세요.',
+    introLangLabel:'언어',
+    introBirthLabel:'생년월일', introNickLabel:'닉네임',
+    introNickPlaceholder:'여행자', introNextBtn:'다음 →',
+    introStartBtn:'✨ 순례 시작',
+    birthYearPh:'년', birthMonthPh:'월', birthDayPh:'일',
+  },
+};
+function t(key) { return I18N[currentLang]?.[key] ?? I18N.ja[key] ?? key; }
+
+function setLang(lang) {
+  currentLang = lang;
+  document.documentElement.lang = lang;
+  document.title = t('appTitle');
+  // Static data-i18n elements
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
+  // Re-render dynamic parts
+  updateBadge();
+  buildFilterChips();
+  if (activeFilter) {
+    const anime = ANIME.find(a=>a.id===activeFilter);
+    if (anime) {
+      const spots = SPOTS.filter(s=>s.animeId===activeFilter);
+      const v = spots.filter(s=>isVisited(s.id)).length;
+      document.getElementById('banner-title').textContent = `${anime.icon} ${animeTitle(anime)}`;
+      document.getElementById('banner-sub').textContent = t('bannerSub')(spots.length, v);
+    }
+  }
+  if (currentSpot) openSheet(currentSpot);
+  const activeScreen = document.querySelector('.screen.active')?.id;
+  if (activeScreen === 'anime-screen') renderAnimeScreen();
+  else if (activeScreen === 'checkin-screen') renderCheckinScreen();
+}
+
+// ===================== MAP =====================
+let userMarker = null;
+let accuracyCircle = null;
+let watchId = null;
+let isTracking = false;
+let routeLayer = null;
+let currentRouteMode = 'foot';
+const ROUTE_MODES = {
+  foot:    { label: '🚶 徒歩',   osrm: 'foot',    color: '#6c63ff', icon: '🚶' },
+  cycling: { label: '🚴 自転車', osrm: 'cycling', color: '#22c55e', icon: '🚴' },
+  driving: { label: '🚗 車',     osrm: 'driving', color: '#f59e0b', icon: '🚗' },
+  transit: { label: '🚃 電車',   osrm: null,      color: '#38bdf8', icon: '🚃' },
+};
+
+
+function initMap() {
+  const JAPAN_BOUNDS = L.latLngBounds([24.0, 122.0], [46.0, 154.0]);
+  map = L.map('map', {
+    zoomControl: false, attributionControl: true,
+    maxBounds: JAPAN_BOUNDS,
+    maxBoundsViscosity: 1.0,
+    minZoom: 5, maxZoom: 18,
+  }).setView([36.5, 137.5], 6);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+    maxZoom: 19
+  }).addTo(map);
+
+  L.control.zoom({ position: 'topright' }).addTo(map);
+
+  // 現在地ボタン
+  const locBtn = L.control({ position: 'bottomright' });
+  locBtn.onAdd = () => {
+    const div = L.DomUtil.create('div');
+    div.id = 'loc-btn';
+    div.innerHTML = '📍';
+    div.title = '現在地を表示';
+    div.style.cssText = `
+      width:42px;height:42px;border-radius:50%;
+      background:var(--surface);border:2px solid var(--border);
+      display:flex;align-items:center;justify-content:center;
+      font-size:1.3rem;cursor:pointer;
+      box-shadow:0 2px 12px rgba(0,0,0,.4);
+      transition:all .2s;user-select:none;
+    `;
+    L.DomEvent.on(div, 'click', L.DomEvent.stopPropagation);
+    L.DomEvent.on(div, 'click', toggleLocation);
+    return div;
+  };
+  locBtn.addTo(map);
+
+  SPOTS.forEach(spot => addMarker(spot));
+  map.on('click', () => closeSheet());
+}
+
+function toggleLocation() {
+  if (!navigator.geolocation) {
+    showToast('⚠️ この端末では位置情報が使えません'); return;
+  }
+  if (isTracking) {
+    stopTracking(); return;
+  }
+  startTracking();
+}
+
+function startTracking() {
+  isTracking = true;
+  const btn = document.getElementById('loc-btn');
+  if (btn) { btn.innerHTML = '⏳'; btn.style.borderColor = 'var(--primary)'; }
+
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+      placeUserMarker(lat, lng, accuracy);
+      if (btn) { btn.innerHTML = '🔵'; btn.style.borderColor = 'var(--primary)'; }
+    },
+    err => {
+      stopTracking();
+      const msgs = { 1:'位置情報の許可が必要です', 2:'位置情報を取得できません', 3:'タイムアウトしました' };
+      showToast(`⚠️ ${msgs[err.code] || '位置情報エラー'}`);
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+  );
+}
+
+function stopTracking() {
+  isTracking = false;
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+  if (accuracyCircle) { map.removeLayer(accuracyCircle); accuracyCircle = null; }
+  const btn = document.getElementById('loc-btn');
+  if (btn) { btn.innerHTML = '📍'; btn.style.borderColor = 'var(--border)'; }
+  showToast('位置情報トラッキングを停止しました');
+}
+
+function placeUserMarker(lat, lng, accuracy) {
+  const userIcon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:18px;height:18px;border-radius:50%;
+      background:#4fc3f7;border:3px solid #fff;
+      box-shadow:0 0 0 4px rgba(79,195,247,.3);
+    "></div>`,
+    iconSize: [18, 18], iconAnchor: [9, 9],
+  });
+
+  if (!userMarker) {
+    userMarker = L.marker([lat, lng], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
+    accuracyCircle = L.circle([lat, lng], {
+      radius: accuracy, color: '#4fc3f7', fillColor: '#4fc3f7',
+      fillOpacity: 0.08, weight: 1, opacity: 0.4,
+    }).addTo(map);
+    map.setView([lat, lng], 13, { animate: true });
+    // 最寄りスポットを案内
+    suggestNearestSpot(lat, lng);
+  } else {
+    userMarker.setLatLng([lat, lng]);
+    accuracyCircle.setLatLng([lat, lng]).setRadius(accuracy);
+  }
+}
+
+function suggestNearestSpot(lat, lng) {
+  let nearest = null, minDist = Infinity;
+  SPOTS.forEach(s => {
+    const d = Math.hypot(s.lat - lat, s.lng - lng);
+    if (d < minDist) { minDist = d; nearest = s; }
+  });
+  if (!nearest) return;
+  const km = Math.round(minDist * 111); // 概算
+  if (km < 50) showToast(`📍 最寄り聖地: ${nearest.name}（約${km}km）`);
+}
+
+function markerIcon(spot) {
+  const anime   = ANIME.find(a => a.id === spot.animeId);
+  const visited = isVisited(spot.id);
+  const color   = anime?.color || '#6c63ff';
+  const clipId  = `mclip-${spot.id}`;   // unique ID per marker to avoid SVG clipPath conflicts
+
+  // Pin teardrop body path (40×50 viewBox, tip at 20,48)
+  const pinBody = `<path d="M20 2C10 2 2 10 2 19c0 11 18 29 18 29s18-18 18-29C38 10 30 2 20 2z"
+                        fill="${color}" stroke="white" stroke-width="1.5"/>
+                   <circle cx="20" cy="18" r="11.5" fill="white" opacity="0.14"/>`;
+
+  // Visited check badge (top-right corner of pin)
+  const visitedBadge = visited
+    ? `<circle cx="31" cy="7" r="6.5" fill="#43d9ad" stroke="white" stroke-width="1.5"/>
+       <text x="31" y="11.5" text-anchor="middle" fill="white" font-size="9" font-weight="bold">✓</text>`
+    : '';
+
+  // ── Anime-specific SVG icons ─────────────────────────────────
+  // Each icon fits inside the ~11px-radius circle at (20,18)
+  const ICONS = {
+
+    // 君の名は。: 宮水三葉の実際のキャラクター画像 (顔部分をサークルクリップ)
+    yourname: `
+      <defs>
+        <clipPath id="${clipId}">
+          <circle cx="20" cy="17" r="12"/>
+        </clipPath>
+      </defs>
+      <image href="./mitsuha.png"
+             x="7" y="5" width="26" height="26"
+             clip-path="url(#${clipId})"
+             preserveAspectRatio="xMidYMin slice"
+             image-rendering="auto"/>`,
+
+    // 聲の形: 5-petal cherry blossom
+    koekatachi: `
+      <g fill="white">
+        <ellipse cx="20" cy="10" rx="2.8" ry="5.8" transform="rotate(0   20 17)"/>
+        <ellipse cx="20" cy="10" rx="2.8" ry="5.8" transform="rotate(72  20 17)"/>
+        <ellipse cx="20" cy="10" rx="2.8" ry="5.8" transform="rotate(144 20 17)"/>
+        <ellipse cx="20" cy="10" rx="2.8" ry="5.8" transform="rotate(216 20 17)"/>
+        <ellipse cx="20" cy="10" rx="2.8" ry="5.8" transform="rotate(288 20 17)"/>
+      </g>
+      <circle cx="20" cy="17" r="4" fill="${color}" stroke="white" stroke-width="1"/>`,
+
+    // 氷菓: double-layer rose (5+5 petals)
+    hyouka: `
+      <g fill="white" opacity="0.95">
+        <ellipse cx="20" cy="10.5" rx="3"   ry="5.5" transform="rotate(0   20 17)"/>
+        <ellipse cx="20" cy="10.5" rx="3"   ry="5.5" transform="rotate(72  20 17)"/>
+        <ellipse cx="20" cy="10.5" rx="3"   ry="5.5" transform="rotate(144 20 17)"/>
+        <ellipse cx="20" cy="10.5" rx="3"   ry="5.5" transform="rotate(216 20 17)"/>
+        <ellipse cx="20" cy="10.5" rx="3"   ry="5.5" transform="rotate(288 20 17)"/>
+      </g>
+      <g fill="white" opacity="0.65">
+        <ellipse cx="20" cy="12.5" rx="2"   ry="3.8" transform="rotate(36  20 17)"/>
+        <ellipse cx="20" cy="12.5" rx="2"   ry="3.8" transform="rotate(108 20 17)"/>
+        <ellipse cx="20" cy="12.5" rx="2"   ry="3.8" transform="rotate(180 20 17)"/>
+        <ellipse cx="20" cy="12.5" rx="2"   ry="3.8" transform="rotate(252 20 17)"/>
+        <ellipse cx="20" cy="12.5" rx="2"   ry="3.8" transform="rotate(324 20 17)"/>
+      </g>
+      <circle cx="20" cy="17" r="4" fill="${color}" stroke="white" stroke-width="1"/>`,
+
+    // ガールズ＆パンツァー: tank silhouette
+    girlspanz: `
+      <g fill="white">
+        <rect x="12"   y="17"   width="16" height="8"   rx="2"/>
+        <rect x="15"   y="11.5" width="9"  height="7"   rx="1.5"/>
+        <rect x="23.5" y="13"   width="7"  height="3"   rx="1.5"/>
+        <rect x="11"   y="23.5" width="18" height="2.5" rx="1.2" opacity="0.75"/>
+      </g>`,
+
+    // あの花: 8-petal sunflower
+    anohana: `
+      <g fill="white" opacity="0.92">
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(0   20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(45  20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(90  20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(135 20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(180 20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(225 20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(270 20 17)"/>
+        <ellipse cx="20" cy="10"  rx="2.3" ry="4.8" transform="rotate(315 20 17)"/>
+      </g>
+      <circle cx="20" cy="17" r="5" fill="${color}" stroke="white" stroke-width="1.2"/>`,
+
+    // ゆるキャン△: Mt.Fuji silhouette + tent
+    yurucamp: `
+      <polygon fill="white"   points="20,9 29,25 11,25"/>
+      <polygon fill="${color}" points="20,9 22.5,15 17.5,15"/>
+      <polygon fill="white"   points="20,28.5 15,33 25,33"/>
+      <line stroke="white" stroke-width="1.5" stroke-linecap="round"
+            x1="20" y1="28.5" x2="20" y2="25"/>`,
+
+    // 響け！ユーフォニアム: beamed 8th notes (♫)
+    eupho: `
+      <g fill="white">
+        <ellipse cx="14.5" cy="22.5" rx="3.8" ry="2.8" transform="rotate(-20 14.5 22.5)"/>
+        <ellipse cx="22.5" cy="21"   rx="3.8" ry="2.8" transform="rotate(-20 22.5 21)"/>
+      </g>
+      <g stroke="white" stroke-width="2" stroke-linecap="round" fill="none">
+        <line x1="18" y1="21"   x2="18" y2="11"/>
+        <line x1="26" y1="19.5" x2="26" y2="10"/>
+        <line x1="18" y1="11"   x2="26" y2="10"/>
+      </g>`,
+
+    // らき☆すた: 4-pointed glitter star
+    lukisuta: `
+      <path fill="white"
+            d="M20 8.5 L21.9 15 L28.5 17 L21.9 19 L20 25.5 L18.1 19 L11.5 17 L18.1 15 Z"/>
+      <circle fill="white" cx="28" cy="11"   r="1.6"/>
+      <circle fill="white" cx="13" cy="24.5" r="1.2"/>`,
+
+    // サマーウォーズ: 3-tiered pagoda
+    summerwars: `
+      <g fill="white">
+        <polygon points="20,9   21.5,13  18.5,13"/>
+        <polygon points="20,12.5 26,17   14,17"/>
+        <rect    x="16.5" y="17" width="7"  height="3.5"/>
+        <polygon points="20,20  28,25   12,25"/>
+        <rect    x="15"   y="25" width="10" height="4.5" rx="0.5"/>
+      </g>`,
+  };
+
+  const iconSvg = ICONS[spot.animeId]
+    || `<text x="20" y="23" text-anchor="middle" fill="white" font-size="16">${anime?.icon || '📍'}</text>`;
+
+  return L.divIcon({
+    className: '',
+    html: `<div class="anime-pin-wrap${visited?' visited':''}" style="--apc:${color}">
+      <svg width="40" height="50" viewBox="0 0 40 50" xmlns="http://www.w3.org/2000/svg"
+           style="overflow:visible;filter:drop-shadow(0 3px 8px rgba(0,0,0,.55))">
+        ${pinBody}
+        ${iconSvg}
+        ${visitedBadge}
+      </svg>
+    </div>`,
+    iconSize:     [40, 50],
+    iconAnchor:   [20, 48],
+    popupAnchor:  [0, -50],
+  });
+}
+
+function addMarker(spot) {
+  const m = L.marker([spot.lat, spot.lng], { icon: markerIcon(spot) }).addTo(map);
+  m.on('click', () => openSheet(spot));
+  markers[spot.id] = m;
+}
+
+function refreshMarkers() {
+  SPOTS.forEach(spot => {
+    if (markers[spot.id]) markers[spot.id].setIcon(markerIcon(spot));
+  });
+}
+
+function filterMarkers(filterAnimeId, searchText) {
+  SPOTS.forEach(spot => {
+    const anime = ANIME.find(a=>a.id===spot.animeId);
+    const matchFilter = !filterAnimeId || spot.animeId === filterAnimeId;
+    const matchSearch = !searchText ||
+      spotName(spot).toLowerCase().includes(searchText.toLowerCase()) ||
+      spot.name.includes(searchText) ||
+      (anime && (animeTitle(anime).toLowerCase().includes(searchText.toLowerCase()) || anime.title.includes(searchText)));
+    if (markers[spot.id]) {
+      const el = markers[spot.id].getElement();
+      if (el) el.style.display = (matchFilter && matchSearch) ? '' : 'none';
+    }
+  });
+}
+
+// ===================== SHEET =====================
+async function fetchWikiImage(title) {
+  try {
+    const res = await fetch(
+      `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.thumbnail ? { src: data.thumbnail.source, page: data.content_urls?.desktop?.page } : null;
+  } catch { return null; }
+}
+
+function selectRouteMode(mode) {
+  currentRouteMode = mode;
+  document.querySelectorAll('.route-mode-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+  // quick-route-tabs にも反映（インデックス順: foot, cycling, driving, transit）
+  const qrts = document.querySelectorAll('.qrt');
+  const modes = ['foot','cycling','driving','transit'];
+  qrts.forEach((btn, i) => btn.classList.toggle('on', modes[i] === mode));
+}
+
+async function showRoute(spotId) {
+  const spot = SPOTS.find(s => s.id === spotId);
+  if (!spot) return;
+  if (!userMarker) {
+    alert(t('alertNoLoc'));
+    return;
+  }
+  const pos = userMarker.getLatLng();
+  const mode = ROUTE_MODES[currentRouteMode];
+
+  // 電車モードは概算 + Yahoo乗換案内リンク
+  if (currentRouteMode === 'transit') {
+    const dLat = spot.lat - pos.lat, dLng = spot.lng - pos.lng;
+    const distKm = Math.sqrt(dLat*dLat + dLng*dLng) * 111;
+    const estMins = Math.round(distKm / 60 * 60 + 15); // 平均60km/h + 乗換15分
+    const yahooUrl = `https://transit.yahoo.co.jp/search/result?flatlon=${pos.lat},${pos.lng}&tlatlon=${spot.lat},${spot.lng}&from=現在地&to=${encodeURIComponent(spotName(spot))}`;
+    closeSheet();
+    let el = document.getElementById('route-info');
+    if (!el) { el = document.createElement('div'); el.id = 'route-info'; document.body.appendChild(el); }
+    el.innerHTML = `
+      <div class="route-info-top">
+        <div class="route-dest">🎯 ${spotName(spot)}</div>
+        <button class="route-clear-btn" onclick="clearRoute()">${t('routeClear')}</button>
+      </div>
+      <div class="route-stats">
+        <span>🚃 ${distKm.toFixed(0)} km</span>
+        <span>⏱ ${estMins} ${t('min')}〜</span>
+        <span style="font-size:.7rem;color:var(--muted)">${t('transitEst')}</span>
+      </div>
+      <a class="route-transit-link" href="${yahooUrl}" target="_blank" rel="noopener">
+        ${t('transitLink')}
+      </a>`;
+    requestAnimationFrame(() => el.classList.add('show'));
+    return;
+  }
+
+  const url = `https://router.project-osrm.org/route/v1/${mode.osrm}/${pos.lng},${pos.lat};${spot.lng},${spot.lat}?overview=full&geometries=geojson`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes.length) throw new Error('no route');
+    const route = data.routes[0];
+    const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    const dist = (route.distance / 1000).toFixed(1);
+    const mins = Math.round(route.duration / 60);
+    if (routeLayer) map.removeLayer(routeLayer);
+    routeLayer = L.polyline(coords, { color: mode.color, weight: 5, opacity: 0.85 }).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+    closeSheet();
+    let el = document.getElementById('route-info');
+    if (!el) { el = document.createElement('div'); el.id = 'route-info'; document.body.appendChild(el); }
+    el.innerHTML = `
+      <div class="route-info-top">
+        <div class="route-dest">🎯 ${spotName(spot)}</div>
+        <button class="route-clear-btn" onclick="clearRoute()">${t('routeClear')}</button>
+      </div>
+      <div class="route-stats">
+        <span>${mode.icon} ${dist} km</span>
+        <span>⏱ ${t('approx')} ${mins} ${t('min')}</span>
+      </div>`;
+    requestAnimationFrame(() => el.classList.add('show'));
+  } catch {
+    alert(t('alertRouteFail'));
+  }
+}
+
+function clearRoute() {
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  const el = document.getElementById('route-info');
+  if (el) el.classList.remove('show');
+}
+
+function openSheet(spot) {
+  currentSpot = spot;
+  const anime = ANIME.find(a=>a.id===spot.animeId);
+  const visited = isVisited(spot.id);
+  const diff = '★'.repeat(spot.difficulty) + '☆'.repeat(3-spot.difficulty);
+  const hasLocation = !!userMarker;
+
+  document.getElementById('sheet-content').innerHTML = `
+    <!-- ★ AR ヒーローバナー -->
+    <div class="ar-hero" style="--ar-ac:${anime.color}">
+      <div class="ar-hero-bg"></div>
+      <div class="ar-hero-inner">
+        <div class="ar-hero-canvas-wrap">
+          <canvas id="ar-hero-canvas" width="130" height="190"></canvas>
+          <div class="ar-hero-glow"></div>
+        </div>
+        <div class="ar-hero-info">
+          <div class="ar-hero-badge">${anime.icon} ${animeTitle(anime)}</div>
+          <div class="ar-hero-title">${spotName(spot)}</div>
+          <div class="ar-hero-sub">📍 ${spot.prefecture}</div>
+          <button class="ar-hero-cta" onclick="openARView('${spot.id}')">
+            📱 ${t('arBtn')}
+          </button>
+        </div>
+        <div class="ar-hero-sparkles">✨</div>
+      </div>
+    </div>
+
+    <!-- コンパクトアクション行 -->
+    <div class="sheet-quick-actions">
+      <button class="quick-checkin${visited?' visited':''}" onclick="checkin('${spot.id}')">
+        ${visited ? '✅ '+t('visited') : '☐ '+t('checkin')}
+      </button>
+      <div class="quick-route-wrap">
+        <div class="quick-route-tabs">
+          <button class="qrt${currentRouteMode==='foot'?' on':''}"    onclick="selectRouteMode('foot')">${t('routeFoot')}</button>
+          <button class="qrt${currentRouteMode==='cycling'?' on':''}" onclick="selectRouteMode('cycling')">${t('routeCycling')}</button>
+          <button class="qrt${currentRouteMode==='driving'?' on':''}" onclick="selectRouteMode('driving')">${t('routeDriving')}</button>
+          <button class="qrt${currentRouteMode==='transit'?' on':''}" onclick="selectRouteMode('transit')">${t('routeTransit')}</button>
+        </div>
+        <button class="quick-route-btn${hasLocation?'':' no-loc'}" onclick="showRoute('${spot.id}')">
+          🗺️ ${hasLocation ? t('routeBtn') : t('routeBtnNoLoc')}
+        </button>
+      </div>
+    </div>
+
+    <!-- スポット説明 -->
+    <div class="sheet-desc">${spotDesc(spot)}</div>
+    <div class="sheet-meta">
+      <span class="meta-pill">🚃 ${spotAccess(spot)}</span>
+      <span class="meta-pill">${t('difficulty')} ${diff}</span>
+      ${visited ? `<span class="meta-pill" style="color:var(--success)">${t('visited')}</span>` : ''}
+    </div>
+  `;
+
+  document.getElementById('spot-sheet').classList.add('open');
+  document.getElementById('overlay').classList.add('show');
+
+  // ARヒーローキャンバスにキャラを描画
+  requestAnimationFrame(() => {
+    const hcv = document.getElementById('ar-hero-canvas');
+    if (!hcv) return;
+    const hctx = hcv.getContext('2d');
+    const char  = AR_CHARS[spot.animeId] || { hair:'#555', item:'star' };
+    const s = 34;
+    const cx = hcv.width / 2, cy = hcv.height - s * 1.1;
+
+    // カスタム画像があれば優先
+    arLoadImage(spot.animeId);
+    const customImg = AR_IMAGES[spot.animeId];
+    if (customImg?.complete && customImg.naturalWidth > 0) {
+      const ih = hcv.height * 0.95;
+      const iw = ih * (customImg.naturalWidth / customImg.naturalHeight);
+      hctx.shadowBlur = 30; hctx.shadowColor = anime.color;
+      hctx.drawImage(customImg, (hcv.width - iw) / 2, hcv.height - ih, iw, ih);
+      hctx.shadowBlur = 0;
+    } else {
+      arDrawCharacter(hctx, cx, cy, s, anime, char);
+    }
+
+    // ボブアニメーション
+    let heroPhase = 0;
+    function heroAnim() {
+      if (!document.getElementById('ar-hero-canvas')) return;
+      heroPhase += 0.05;
+      hctx.clearRect(0, 0, hcv.width, hcv.height);
+      hctx.save();
+      hctx.translate(cx, cy + Math.sin(heroPhase) * 5);
+      hctx.translate(-cx, -cy);
+      const ci = AR_IMAGES[spot.animeId];
+      if (ci?.complete && ci.naturalWidth > 0) {
+        const ih = hcv.height * 0.95;
+        const iw = ih * (ci.naturalWidth / ci.naturalHeight);
+        hctx.shadowBlur = 24; hctx.shadowColor = anime.color;
+        hctx.drawImage(ci, (hcv.width - iw) / 2, hcv.height - ih, iw, ih);
+        hctx.shadowBlur = 0;
+      } else {
+        arDrawCharacter(hctx, cx, cy, s, anime, char);
+      }
+      hctx.restore();
+      requestAnimationFrame(heroAnim);
+    }
+    heroAnim();
+  });
+
+  // Wikiの実写画像をARヒーロー背景にぼかしで合成
+  if (spot.wikiTitle) {
+    fetchWikiImage(spot.wikiTitle).then(result => {
+      const bg = document.querySelector('.ar-hero-bg');
+      if (!bg || !result?.src) return;
+      bg.style.backgroundImage = `url('${result.src}')`;
+      bg.style.backgroundSize  = 'cover';
+      bg.style.backgroundPosition = 'center';
+      bg.style.filter = 'brightness(.25) saturate(1.4)';
+    });
+  }
+}
+
+function closeSheet() {
+  document.getElementById('spot-sheet').classList.remove('open');
+  document.getElementById('overlay').classList.remove('show');
+  currentSpot = null;
+}
+
+function checkin(spotId) {
+  if (isVisited(spotId)) return;
+  const spot = SPOTS.find(s=>s.id===spotId);
+  const anime = ANIME.find(a=>a.id===spot.animeId);
+  checkins.push({ spotId, timestamp: new Date().toISOString() });
+  saveCheckins();
+  // Refresh UI
+  refreshMarkers();
+  updateBadge();
+  if (currentSpot?.id === spotId) openSheet(currentSpot); // re-render sheet
+  // Check for anime completion badge
+  const ac = animeVisitedCount(spot.animeId);
+  const total = SPOTS.filter(s=>s.animeId===spot.animeId).length;
+  if (ac === total) showToast(t('completionToast')(anime.icon, animeTitle(anime)));
+  else showToast(t('checkinToast')(spotName(spot)));
+}
+
+// ===================== FILTER CHIPS =====================
+function buildFilterChips() {
+  const wrap = document.getElementById('filter-chips');
+  wrap.innerHTML = `<button class="chip${!activeFilter?' active':''}\" onclick="setFilter(null)\" style="color:#fff">${t('filterAll')}</button>` +
+    ANIME.map(a => {
+      const cnt = SPOTS.filter(s=>s.animeId===a.id).length;
+      const active = activeFilter===a.id;
+      return `<button class="chip${active?' active':''}" onclick="setFilter('${a.id}')"
+        style="${active?`background:${a.color}22;border-color:${a.color};color:${a.color}`:''}">
+        ${a.icon} ${animeTitle(a)}
+      </button>`;
+    }).join('');
+}
+
+function setFilter(animeId) {
+  activeFilter = animeId;
+  buildFilterChips();
+  const search = document.getElementById('map-search').value;
+  filterMarkers(animeId, search);
+
+  const banner = document.getElementById('anime-guide-banner');
+  if (animeId) {
+    const anime = ANIME.find(a=>a.id===animeId);
+    const spots = SPOTS.filter(s=>s.animeId===animeId);
+    const visited = spots.filter(s=>isVisited(s.id)).length;
+    document.getElementById('banner-title').textContent = `${anime.icon} ${animeTitle(anime)}`;
+    document.getElementById('banner-sub').textContent = t('bannerSub')(spots.length, visited);
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+
+// ===================== GUIDE MODAL =====================
+const imgCache = {};
+
+async function openGuideModal() {
+  if (!activeFilter) return;
+  const anime = ANIME.find(a=>a.id===activeFilter);
+  const spots = SPOTS.filter(s=>s.animeId===activeFilter);
+
+  document.getElementById('guide-modal-title').textContent = `${anime.icon} ${animeTitle(anime)} ${t('guideTitle')}`;
+
+  const body = document.getElementById('guide-body');
+  body.innerHTML = `
+    <div class="guide-hero">
+      <div class="guide-hero-icon">${anime.icon}</div>
+      <div class="guide-hero-info">
+        <div class="big">${animeTitle(anime)}</div>
+        <div class="meta">${anime.year}${t('yearUnit')} · ${animeTitleSep(anime)} · ${spots.length}${t('spotsUnit')}</div>
+      </div>
+    </div>
+    <div class="guide-section-title">${t('spotList')}</div>
+    ${spots.map(s => `
+      <div class="guide-spot-card" id="gcard-${s.id}">
+        <div class="guide-spot-img-placeholder" id="gpimg-${s.id}">🏙️</div>
+        <div class="guide-spot-body">
+          <div class="guide-spot-name">${spotName(s)}</div>
+          <div class="guide-spot-scene">🎬 ${spotScene(s) || t('sceneNone')}</div>
+          <div class="guide-spot-desc">${spotDesc(s)}</div>
+          <div class="guide-spot-footer">
+            <span class="guide-spot-pref">📍 ${s.prefecture} · 🚃 ${spotAccess(s)}</span>
+            <button class="guide-jump-btn" onclick="jumpFromGuide('${s.id}')">${t('seeOnMap')}</button>
+          </div>
+        </div>
+      </div>`).join('')}
+    <div style="height:24px"></div>
+  `;
+
+  document.getElementById('guide-modal').classList.add('open');
+
+  // 画像を非同期で順番に取得
+  for (const s of spots) {
+    if (!s.wikiTitle) continue;
+    const img = await fetchWikiImage(s.wikiTitle);
+    const el = document.getElementById(`gpimg-${s.id}`);
+    if (!el) continue;
+    if (img?.src) {
+      el.outerHTML = `<img class="guide-spot-img" src="${img.src}" loading="lazy" alt="${s.name}">`;
+    }
+  }
+}
+
+function closeGuideModal() {
+  document.getElementById('guide-modal').classList.remove('open');
+}
+
+function jumpFromGuide(spotId) {
+  closeGuideModal();
+  const spot = SPOTS.find(s=>s.id===spotId);
+  if (!spot) return;
+  setTimeout(() => {
+    map.setView([spot.lat, spot.lng], 14, { animate: true });
+    openSheet(spot);
+  }, 150);
+}
+
+// ===================== ANIME SCREEN =====================
+function renderAnimeScreen() {
+  const list = document.getElementById('anime-list');
+  list.innerHTML = ANIME.map(anime => {
+    const spots = SPOTS.filter(s=>s.animeId===anime.id);
+    const visited = spots.filter(s=>isVisited(s.id)).length;
+    const pct = spots.length ? Math.round(visited/spots.length*100) : 0;
+
+    const spotRows = spots.map(s => `
+      <div class="spot-row" onclick="jumpToSpot('${s.id}')">
+        <div class="spot-check${isVisited(s.id)?' done':''}">${isVisited(s.id)?'✓':''}</div>
+        <div class="spot-row-name">${spotName(s)}</div>
+        <div class="spot-row-pref">${s.prefecture}</div>
+        <div class="diff-stars" style="color:${anime.color}">${'★'.repeat(s.difficulty)}</div>
+      </div>`).join('');
+
+    return `
+      <div class="anime-card" onclick="toggleAnimeCard(this)">
+        <div class="anime-card-top">
+          <div class="anime-icon" style="background:${anime.color}22">${anime.icon}</div>
+          <div class="anime-card-info">
+            <div class="anime-card-title">${animeTitle(anime)}</div>
+            <div class="anime-card-meta">${anime.year}${t('yearUnit')} · ${animeTitleSep(anime)}</div>
+          </div>
+          <div class="anime-card-count">
+            <div class="big" style="color:${anime.color}">${visited}/${spots.length}</div>
+            <div class="small">${t('spot')}</div>
+          </div>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:${pct}%;background:${anime.color}"></div>
+        </div>
+        <div class="anime-spot-list">${spotRows}</div>
+      </div>`;
+  }).join('');
+}
+
+function toggleAnimeCard(card) {
+  card.classList.toggle('expanded');
+}
+
+function jumpToSpot(spotId) {
+  const spot = SPOTS.find(s=>s.id===spotId);
+  if (!spot) return;
+  switchScreen('map-screen');
+  setTimeout(() => {
+    map.setView([spot.lat, spot.lng], 14, { animate: true });
+    openSheet(spot);
+  }, 100);
+}
+
+// ===================== CHECKIN SCREEN =====================
+function renderCheckinScreen() {
+  const content = document.getElementById('checkin-content');
+  const visited = visitedCount();
+  const total = SPOTS.length;
+  const pct = Math.round(visited/total*100);
+  const uniqueAnime = new Set(checkins.map(c=>SPOTS.find(s=>s.id===c.spotId)?.animeId).filter(Boolean)).size;
+
+  // Badges
+  const badges = [
+    { icon:'🗺️', name:t('badge0'),  unlocked: visited >= 1 },
+    { icon:'🌟', name:t('badge5'),  unlocked: visited >= 5 },
+    { icon:'🏅', name:t('badge10'), unlocked: visited >= 10 },
+    ...ANIME.map(a => ({
+      icon: a.icon,
+      name: `${a.title}\n${t('badgeComplete')}`,
+      unlocked: animeVisitedCount(a.id) === SPOTS.filter(s=>s.animeId===a.id).length
+        && SPOTS.filter(s=>s.animeId===a.id).length > 0
+    }))
+  ];
+
+  // Checkin history (latest first, deduplicated by spot)
+  const seen = new Set();
+  const history = [...checkins].reverse().filter(c => {
+    if (seen.has(c.spotId)) return false;
+    seen.add(c.spotId); return true;
+  });
+
+  const historyHtml = history.length ? history.map(c => {
+    const spot = SPOTS.find(s=>s.id===c.spotId);
+    const anime = spot ? ANIME.find(a=>a.id===spot.animeId) : null;
+    const dt = new Date(c.timestamp);
+    const label = `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    return `
+      <div class="checkin-item">
+        <div class="checkin-dot" style="background:${anime?.color||'#6c63ff'}"></div>
+        <div class="checkin-info">
+          <div class="checkin-spot">${spot ? spotName(spot) : t('unknown')}</div>
+          <div class="checkin-anime">${anime?.icon||''} ${anime ? animeTitle(anime) : ''} · ${spot?.prefecture||''}</div>
+        </div>
+        <div class="checkin-time">${label}</div>
+      </div>`;
+  }).join('') : `
+    <div class="empty-state">
+      <div class="e-icon">📍</div>
+      <p>${t('emptyHistory')}</p>
+    </div>`;
+
+  content.innerHTML = `
+    <div class="stats-grid anim-in">
+      <div class="stat-card">
+        <div class="stat-val" style="color:var(--primary)">${visited}</div>
+        <div class="stat-key">${t('statSpots')}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="color:var(--gold)">${uniqueAnime}</div>
+        <div class="stat-key">${t('statAnime')}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" style="color:var(--success)">${pct}%</div>
+        <div class="stat-key">${t('statRate')}</div>
+      </div>
+    </div>
+
+    <div class="total-progress anim-in">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:.85rem;font-weight:700">${t('totalProgress')}</span>
+        <span style="font-size:.85rem;color:var(--muted)">${visited} / ${total} ${t('spot')}</span>
+      </div>
+      <div class="progress-bar" style="height:8px">
+        <div class="progress-fill" style="width:${pct}%;background:linear-gradient(90deg,var(--primary),#9d4edd)"></div>
+      </div>
+    </div>
+
+    <div class="section-title anim-in">${t('badges')}</div>
+    <div class="badges-grid anim-in">
+      ${badges.map(b=>`
+        <div class="badge-card ${b.unlocked?'unlocked':'locked'}">
+          <div class="badge-icon">${b.icon}</div>
+          <div class="badge-name">${b.name}</div>
+        </div>`).join('')}
+    </div>
+
+    <div class="section-title anim-in">${t('history')}</div>
+    <div class="checkin-list anim-in">${historyHtml}</div>
+  `;
+}
+
+// ===================== AR VIEW =====================
+let arStream = null;
+let arAnimId = null;
+let arGamma = 0, arBeta = 0;
+let arBubbleText = '';
+let arBubbleOpacity = 0;
+let arCurrentSpotId = '';
+let arCharPos = null; // { x, y } ドラッグで移動可能なキャラ位置
+
+// カスタム画像キャッシュ
+const AR_IMAGES = {};
+const AR_IMAGE_SRC = {
+  yourname: 'mitsuha.png',
+};
+function arLoadImage(animeId) {
+  if (AR_IMAGES[animeId] || !AR_IMAGE_SRC[animeId]) return;
+  const img = new Image();
+  img.src = AR_IMAGE_SRC[animeId];
+  AR_IMAGES[animeId] = img;
+}
+
+// AR_DIALOGUE: 各キー → { ja, en, zh, ko } の配列
+const AR_DIALOGUE = {
+  // 君の名は。― 三葉・瀧
+  yn1: {
+    ja: ['あれ、また夢かな。でも…なんか来たことある気がする', '好きだって、なんで夢の中でしか言えないんだろ', 'ここに来れば会える気がして'],
+    en: ["Is this a dream again...? But I feel like I've been here before", "Why can I only say 'I like you' in dreams?", "I felt like if I came here, I'd find you"],
+    zh: ['又是梦吗……但总感觉来过这里', '为什么只能在梦里才说出喜欢呢', '来到这里，感觉就能见到你'],
+    ko: ['또 꿈인가… 근데 왠지 여기 온 적 있는 것 같아', '왜 꿈속에서밖에 좋아한다고 못 하는 걸까', '여기 오면 만날 수 있을 것 같아서'],
+  },
+  yn2: {
+    ja: ['彗星がちょうど真上に来るんだよ、この湖に', 'やっぱり夢じゃなかった。ここに、いたんだね', 'もし会えたら、名前を聞こうと思ってた'],
+    en: ['The comet passes right above this lake', "It wasn't a dream after all. You were really here", 'If I found you, I was going to ask your name'],
+    zh: ['彗星就在这个湖正上方经过', '果然不是梦。你真的在这里', '如果能遇到你，我想问你的名字'],
+    ko: ['혜성이 딱 이 호수 위를 지나가거든', '역시 꿈이 아니었어. 정말 여기 있었구나', '만나면 이름을 물어보려 했어'],
+  },
+  yn3: {
+    ja: ['東京のどこかに絶対いるはずなんだ、まだ', 'この景色、夢で見たことある。不思議だよね', 'ねえ、君の名前は？'],
+    en: ["You must still be somewhere in Tokyo", "I've seen this scenery in a dream. Isn't that strange?", "Hey... what's your name?"],
+    zh: ['你一定还在东京某个地方', '这个景色，我在梦里见过。真奇妙', '喂，你叫什么名字？'],
+    ko: ['분명 아직 도쿄 어딘가에 있을 거야', '이 풍경, 꿈에서 본 적 있어. 신기하지?', '있잖아, 너의 이름은？'],
+  },
+  yourname: {
+    ja: ['君の名は…', 'むすびって、時間を繋ぐ糸なんだってさ', '夢の中でずっと探してたんだ'],
+    en: ["Your name is...", "Musubi — the thread that ties time together", "I've been searching for you in my dreams all along"],
+    zh: ['你的名字是……', '"结"是连接时间的线，据说', '在梦里一直在找你'],
+    ko: ['너의 이름은…', '무스비는 시간을 잇는 실이래', '꿈속에서 계속 찾고 있었어'],
+  },
+
+  // 聲の形 ― 硝子・将也
+  kk1: {
+    ja: ['ありがとう、来てくれて', 'ちゃんと聞こえてるよ', '石田くんに、また会えた'],
+    en: ['Thank you for coming', 'I can hear you properly', 'I got to see Ishida-kun again'],
+    zh: ['谢谢你来找我', '我听得到哦', '又见到石田同学了'],
+    ko: ['와줘서 고마워', '잘 들려', '이시다 군을 다시 만났어'],
+  },
+  kk2: {
+    ja: ['この川沿い、また一緒に歩きたいな', '大垣の風、やっぱり好きだな', 'ここ、一人で来ることあったんだ'],
+    en: ['I want to walk along this river with you again', 'I really love the breeze here in Ogaki', 'I used to come here alone sometimes'],
+    zh: ['真想再和你一起沿着这条河走', '大垣的风，果然喜欢', '以前有时候一个人来这里'],
+    ko: ['이 강변을 또 같이 걷고 싶어', '오가키의 바람, 역시 좋아', '여기 혼자 온 적도 있었어'],
+  },
+  kk3: {
+    ja: ['生きてて、よかったよ', 'ここで、全部変わった気がする', 'ちゃんと前向けるようになったよ'],
+    en: ["I'm glad I'm alive", 'I feel like everything changed here', 'I can finally face forward now'],
+    zh: ['活着真是太好了', '感觉在这里，一切都改变了', '终于能向前看了'],
+    ko: ['살아있어서 다행이야', '여기서 모든 게 바뀐 것 같아', '이제 제대로 앞을 볼 수 있게 됐어'],
+  },
+  koekatachi: {
+    ja: ['ありがとう', '聞こえてるから、大丈夫だよ', 'また会いに来てね'],
+    en: ['Thank you', "I can hear you, it's okay", 'Come see me again'],
+    zh: ['谢谢你', '我听得到，没关系的', '再来看我哦'],
+    ko: ['고마워', '들려, 괜찮아', '또 만나러 와줘'],
+  },
+
+  // 氷菓 ― 千反田・折木
+  hy1: {
+    ja: ['私、気になります！', 'ちょっと待ってください、本当に気になります！', '折木さん、良ければ教えてもらえますか？'],
+    en: ["I'm curious about this!", 'Wait — I really need to know!', "Oreki-san, could you tell me if you don't mind?"],
+    zh: ['我很在意！', '等一下，我真的很在意！', '折木同学，可以告诉我吗？'],
+    ko: ['저 궁금해요！', '잠깐요, 진짜 궁금해요！', '오레키 씨, 괜찮으시면 알려주시겠어요？'],
+  },
+  hy2: {
+    ja: ['やらなくていいことはやらない。それだけだ', 'まあ…これくらいはやってやるか', 'できれば省エネで済ませたい'],
+    en: ["If I don't have to do it, I won't. Simple as that", "Well... I guess I'll do this much", "I'd rather conserve energy if I can"],
+    zh: ['不必要做的事就不做，就这样', '嗯……就做这点好了', '能省力就省力'],
+    ko: ['안 해도 되는 건 안 해. 그것뿐이야', '뭐… 이 정도는 해주지', '가능하면 에너지 절약하고 싶어'],
+  },
+  hyouka: {
+    ja: ['私、気になります！', 'やらなくていいことは、やらない', '何かあったんでしょうか、ここで？', '省エネでいこう'],
+    en: ["I'm curious!", "If I don't have to do it, I won't", 'Did something happen here?', 'Conserving energy is the way'],
+    zh: ['我很在意！', '不必要的事不做', '这里发生过什么吗？', '省力为上'],
+    ko: ['궁금해요！', '안 해도 되는 건 안 해', '여기서 뭔가 있었나요？', '에너지 절약이 최고'],
+  },
+
+  // ガールズ＆パンツァー ― みほ
+  gp1: {
+    ja: ['みんなで大洗を守るよ！', '戦車道って、本当に楽しいんです', 'ここに来ると、あの試合を思い出すな'],
+    en: ["We'll protect Ooarai together!", 'Tankery is really so much fun', 'Coming here takes me back to that match'],
+    zh: ['大家一起保护大洗！', '战车道真的很有趣', '来到这里就想起那场比赛'],
+    ko: ['모두 함께 오아라이를 지키자！', '전차도는 정말 재미있어요', '여기 오면 그 시합이 떠올라'],
+  },
+  gp2: {
+    ja: ['大洗へようこそ！', '戦車道は、女の子のたしなみです', 'みんなのおかげで勝てたんです、本当に'],
+    en: ['Welcome to Ooarai!', 'Tankery is the mark of a refined young lady', 'We really could only win because of everyone'],
+    zh: ['欢迎来到大洗！', '战车道是女孩子的修养', '真的是靠大家才赢的'],
+    ko: ['오아라이에 오신 걸 환영해요！', '전차도는 여자아이의 교양이에요', '모두 덕분에 이길 수 있었어요'],
+  },
+  girlspanz: {
+    ja: ['諦めないよ、絶対に！', '仲間を信じてれば、なんとかなる', 'また一緒に戦おうね'],
+    en: ["I'll never give up!", 'If you trust your team, everything will work out', "Let's fight together again"],
+    zh: ['绝对不放弃！', '相信伙伴就一定没问题', '下次再一起战斗吧'],
+    ko: ['절대 포기하지 않아！', '동료를 믿으면 어떻게든 돼', '또 같이 싸우자'],
+  },
+
+  // あの花 ― めんま
+  af1: {
+    ja: ['じんたん！ じんたんだ！', 'みんなのこと、ずっと大好きだよ！', '超平和バスターズ、ずっと仲良しでいようね'],
+    en: ['Jintan! It\'s Jintan!', "I'll always love everyone so much!", "Let's stay best friends forever, Super Peace Busters"],
+    zh: ['仁太！是仁太！', '我永远最喜欢大家！', '超和平克星，要永远好好相处哦'],
+    ko: ['진탄！ 진탄이다！', '모두를 계속 엄청 좋아해！', '초평화 버스터즈, 영원히 사이좋게 지내자'],
+  },
+  af2: {
+    ja: ['お祭り、楽しかったなあ', 'ここでみんなと遊んだね', 'じんたん、泣かないでね'],
+    en: ['The festival was so much fun', 'We all played here together', "Don't cry, Jintan"],
+    zh: ['祭典真开心啊', '以前大家在这里一起玩吧', '仁太，不要哭哦'],
+    ko: ['축제 정말 즐거웠다', '여기서 모두 같이 놀았지', '진탄, 울지 마'],
+  },
+  anohana: {
+    ja: ['じんたん！', 'みんなが大好きだよ！', 'ずっとそばにいるよ', 'お願い、叶えてね'],
+    en: ['Jintan!', 'I love everyone so much!', "I'll always be by your side", 'Please... grant my wish'],
+    zh: ['仁太！', '我最喜欢大家了！', '我会一直在你身边的', '拜托，帮我实现愿望'],
+    ko: ['진탄！', '모두를 엄청 좋아해！', '계속 곁에 있을게', '부탁해, 이뤄줘'],
+  },
+
+  // ゆるキャン△ ― リン
+  yc1: {
+    ja: ['ソロキャン、やっぱ最高だな', '富士山見えた。来てよかった', 'うん、いいね、ここ'],
+    en: ['Solo camping is just the best', 'I can see Mt. Fuji. Glad I came', 'Yeah... this spot is nice'],
+    zh: ['单人露营果然最棒', '看到富士山了。来对了', '嗯，这里不错'],
+    ko: ['솔로캠프, 역시 최고야', '후지산이 보여. 오길 잘했다', '응, 여기 좋다'],
+  },
+  yc2: {
+    ja: ['身延か。また来よ', 'なでしこ、元気にしてるかな', 'バイクで走ったら気持ちよさそうだな'],
+    en: ["Minobu, huh. I'll come back", 'I wonder how Nadeshiko is doing', 'This road looks perfect for my bike'],
+    zh: ['身延啊。下次再来', '撫子最近怎么样了', '骑摩托跑这段路应该很舒服'],
+    ko: ['미노부구나. 또 오자', '나데시코, 잘 지내려나', '오토바이로 달리면 기분 좋겠다'],
+  },
+  yurucamp: {
+    ja: ['キャンプって、いいもんだよ', '一人の時間も、悪くない', '富士山、きれいだな', 'また行こ、キャンプ'],
+    en: ['Camping really is great', 'Time alone is not so bad', 'Mt. Fuji is beautiful', "Let's go camping again"],
+    zh: ['露营真是不错', '一个人的时间也挺好', '富士山真漂亮', '下次再去露营吧'],
+    ko: ['캠핑은 좋은 거야', '혼자만의 시간도 나쁘지 않아', '후지산, 예쁘다', '또 가자, 캠핑'],
+  },
+
+  // 響け！ユーフォニアム ― 麗奈・久美子
+  eu1: {
+    ja: ['麗奈がここでトランペット吹いたんだよね', '久美子、私ね、特別になりたい', 'うまい！ …また素直に言っちゃった'],
+    en: ['This is where Reina played her trumpet', 'Kumiko, I want to be special', "You're good! ...I said it honestly again"],
+    zh: ['丽奈就是在这里吹小号的呢', '久美子，我想变得特别', '厉害！……又说心里话了'],
+    ko: ['레이나가 여기서 트럼펫을 불었지', '구미코, 나 특별해지고 싶어', '잘하네！ ……또 솔직하게 말해버렸다'],
+  },
+  eu2: {
+    ja: ['私、特別になりたい', '音楽に嘘はつけないよ', '全国大会、絶対行く'],
+    en: ['I want to be special', "You can't lie with music", "We're definitely going to nationals"],
+    zh: ['我想变得特别', '音乐不会说谎', '全国大赛，一定要去'],
+    ko: ['나는 특별해지고 싶어', '음악에는 거짓말을 할 수 없어', '전국 대회, 반드시 갈 거야'],
+  },
+  eupho: {
+    ja: ['私、特別になりたい', 'うまい！', 'ユーフォの音、好きだな', '音楽って、正直だよ'],
+    en: ['I want to be special', "You're good!", 'I love the sound of the euphonium', 'Music is honest'],
+    zh: ['我想变得特别', '厉害！', '好喜欢长号的音色', '音乐是诚实的'],
+    ko: ['나는 특별해지고 싶어', '잘하네！', '유포의 소리 좋아', '음악은 솔직해'],
+  },
+
+  // らき☆すた ― こなた
+  ls1: {
+    ja: ['やば！ここが聖地じゃないですか！ テンション上がる〜', 'アニメ好きならここ来ないとでしょ', 'クロちゃんにも教えてあげなきゃ'],
+    en: ["No way! This is a real anime sacred spot! I'm so hyped!", 'If you love anime, you have to come here', 'I need to tell Kuroi-chan about this too'],
+    zh: ['哇！这不就是圣地嘛！好兴奋～', '喜欢动漫的人不来这里不行', '也要告诉黑野酱'],
+    ko: ['이야！여기가 성지잖아요！ 설레！', '애니 좋아하면 여기 와야지', '쿠로이짱한테도 알려줘야 해'],
+  },
+  lukisuta: {
+    ja: ['アニメは人生！', 'いやー、来たかったんだよね〜ここ', 'これ絶対フラグじゃないですか？', 'やっぱりゲームより現地巡礼に限る'],
+    en: ['Anime is life!', "Man, I really wanted to come here~", 'This is definitely a flag, right?', 'Nothing beats visiting the actual location'],
+    zh: ['动漫就是人生！', '啊～真的好想来这里', '这不就是个旗子吗？', '果然现地巡礼比游戏更有意思'],
+    ko: ['애니는 인생！', '아－진짜 오고 싶었는데～여기', '이거 완전 플래그 아닌가요？', '역시 게임보다 현지 순례가 최고'],
+  },
+
+  // サマーウォーズ ― 夏希・健二
+  sw1: {
+    ja: ['愛してます！ …これが切り札ね', '家族って、やっぱり強いんだなって思う', '上田城か、ここが陣内家のルーツか'],
+    en: ['I love you! ...That\'s my trump card', 'Family really is strong, I think', "Ueda Castle... so this is the Jinnouchi family's roots"],
+    zh: ['我爱你！……这就是底牌', '家人果然是最强的', '上田城啊，这就是阵内家的根'],
+    ko: ['사랑해요！ ……이게 비장의 카드야', '가족이란 역시 강하다고 생각해', '우에다 성이구나, 여기가 진노우치 집안의 뿌리구나'],
+  },
+  sw2: {
+    ja: ['陣内家のみんなで戦ったんだよね、ここで', 'OZでまた会おう！', '絶対に諦めないって、そう決めたんだ'],
+    en: ['All of the Jinnouchi family fought here together', "Let's meet again in OZ!", "I've decided — I'll never give up"],
+    zh: ['阵内家的大家在这里一起战斗过呢', '在OZ再见吧！', '绝对不放弃，我已经决定了'],
+    ko: ['진노우치 가족 모두가 여기서 싸웠지', 'OZ에서 또 만나요！', '절대 포기하지 않겠다고 그렇게 결심했어'],
+  },
+  summerwars: {
+    ja: ['愛してます！', '家族の絆って、本物だよ', 'OZの世界にようこそ', '諦めなければ、なんとかなる'],
+    en: ['I love you!', 'Family bonds are the real deal', 'Welcome to the world of OZ', "If you don't give up, it'll work out"],
+    zh: ['我爱你！', '家人的羁绊是真实的', '欢迎来到OZ的世界', '只要不放弃，总会有办法的'],
+    ko: ['사랑해요！', '가족의 유대는 진짜야', 'OZ의 세계에 오신 걸 환영해요', '포기하지 않으면 어떻게든 돼'],
+  },
+};
+
+const AR_CHARS = {
+  yourname:   { hair:'#2c1810', item:'cord'      },
+  koekatachi: { hair:'#c8a870', item:'flower'    },
+  hyouka:     { hair:'#5c3d2e', item:'book'      },
+  girlspanz:  { hair:'#e8d860', item:'helmet'    },
+  anohana:    { hair:'#e0d8c8', item:'sunflower' },
+  yurucamp:   { hair:'#1a0e08', item:'lantern'   },
+  eupho:      { hair:'#7a4020', item:'note'      },
+  lukisuta:   { hair:'#4848c0', item:'star'      },
+  summerwars: { hair:'#cc5500', item:'digital'   },
+};
+
+async function openARView(spotId) {
+  const spot = SPOTS.find(s => s.id === spotId);
+  if (!spot) return;
+  const anime = ANIME.find(a => a.id === spot.animeId);
+  const char  = AR_CHARS[spot.animeId] || { hair:'#333', item:'star' };
+
+  // iOS DeviceOrientation permission
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try { await DeviceOrientationEvent.requestPermission(); } catch(e) {}
+  }
+
+  // Camera
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'environment', width:{ideal:1280}, height:{ideal:720} }
+    });
+  } catch(e) {
+    alert(t('arNoCamera')); return;
+  }
+  arStream = stream;
+
+  // Build overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'ar-overlay';
+  overlay.innerHTML = `
+    <video id="ar-video" autoplay playsinline muted></video>
+    <canvas id="ar-canvas"></canvas>
+    <div id="ar-top-bar">
+      <button id="ar-back-btn" onclick="closeARView()">← ${t('arBack')}</button>
+      <div id="ar-spot-label">${anime.icon} ${spotName(spot)}</div>
+    </div>
+    <div id="ar-hint">${t('arHint')}</div>`;
+  document.body.appendChild(overlay);
+
+  const video = document.getElementById('ar-video');
+  video.srcObject = stream;
+  await new Promise(r => { video.onloadedmetadata = r; });
+
+  arCurrentSpotId = spot.id;
+  arBubbleText = ''; arBubbleOpacity = 0;
+  arLoadImage(spot.animeId); // カスタム画像があればプリロード
+
+  const onOrient = e => { arGamma = e.gamma || 0; arBeta = e.beta || 0; };
+  window.addEventListener('deviceorientation', onOrient);
+  overlay._cleanup = () => window.removeEventListener('deviceorientation', onOrient);
+
+  // ドラッグ移動 + タップでセリフ
+  const arCanvasEl = document.getElementById('ar-canvas');
+  let _dragActive = false, _dragMoved = false;
+  let _dragStartX = 0, _dragStartY = 0, _dragBaseX = 0, _dragBaseY = 0;
+
+  arCanvasEl.addEventListener('pointerdown', e => {
+    _dragActive = true; _dragMoved = false;
+    _dragStartX = e.clientX; _dragStartY = e.clientY;
+    _dragBaseX = arCharPos ? arCharPos.x : window.innerWidth  / 2;
+    _dragBaseY = arCharPos ? arCharPos.y : window.innerHeight / 2;
+    arCanvasEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  arCanvasEl.addEventListener('pointermove', e => {
+    if (!_dragActive) return;
+    const dx = e.clientX - _dragStartX;
+    const dy = e.clientY - _dragStartY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) _dragMoved = true;
+    if (_dragMoved) {
+      arCharPos = { x: _dragBaseX + dx, y: _dragBaseY + dy };
+    }
+    e.preventDefault();
+  });
+  arCanvasEl.addEventListener('pointerup', e => {
+    if (!_dragActive) return;
+    _dragActive = false;
+    if (!_dragMoved) arSayLine(spot.id, spot.animeId); // タップ判定
+    e.preventDefault();
+  });
+  arCanvasEl.addEventListener('pointercancel', () => { _dragActive = false; });
+
+  startARDraw(anime, char);
+
+  // 登場後に自動で一言
+  setTimeout(() => {
+    if (document.getElementById('ar-canvas')) arSayLine(spot.id, spot.animeId);
+  }, 1800);
+
+  setTimeout(() => {
+    const hint = document.getElementById('ar-hint');
+    if (hint) hint.style.opacity = '0';
+  }, 4000);
+}
+
+function closeARView() {
+  window.speechSynthesis?.cancel();
+  if (arAnimId) { cancelAnimationFrame(arAnimId); arAnimId = null; }
+  if (arStream) { arStream.getTracks().forEach(t => t.stop()); arStream = null; }
+  const overlay = document.getElementById('ar-overlay');
+  if (overlay) { overlay._cleanup?.(); overlay.remove(); }
+  arGamma = 0; arBeta = 0; arBubbleText = ''; arBubbleOpacity = 0; arCharPos = null;
+}
+
+function startARDraw(anime, char) {
+  const canvas = document.getElementById('ar-canvas');
+  const ctx    = canvas.getContext('2d');
+  let phase = 0;
+
+  // Floating particles
+  const particles = Array.from({length:22}, () => ({
+    angle: Math.random() * Math.PI * 2,
+    r: 70 + Math.random() * 80,
+    speed: 0.007 + Math.random() * 0.013,
+    size: 3 + Math.random() * 5,
+    op: 0.4 + Math.random() * 0.5,
+    off: Math.random() * Math.PI * 2,
+  }));
+
+  let enterT = 0;
+
+  function frame() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    phase  += 0.04;
+    enterT  = Math.min(enterT + 0.035, 1);
+    const es = arEaseElastic(enterT);
+
+    // 初回フレームで画面中央に初期化
+    if (!arCharPos) {
+      arCharPos = { x: canvas.width / 2, y: canvas.height / 2 };
+    }
+
+    const bobY = Math.sin(phase) * 10;
+    const cx = arCharPos.x;
+    const cy = arCharPos.y + bobY * es;
+    const s  = Math.min(canvas.width, canvas.height) * 0.25 * es;
+
+    // Particles
+    particles.forEach(p => {
+      p.angle += p.speed;
+      const px = cx + Math.cos(p.angle) * p.r * es;
+      const py = cy - s * 0.3 + Math.sin(p.angle) * p.r * 0.5 * es;
+      const twinkle = 0.5 + 0.5 * Math.sin(phase * 2.2 + p.off);
+      ctx.save();
+      ctx.globalAlpha = p.op * twinkle * es;
+      ctx.fillStyle   = anime.color;
+      ctx.shadowBlur  = 8; ctx.shadowColor = anime.color;
+      arDrawStar(ctx, px, py, p.size * twinkle, p.size * twinkle * 0.4);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    if (s > 4) {
+      const customImg = AR_IMAGES[anime.id];
+      if (customImg?.complete && customImg.naturalWidth > 0) {
+        arDrawImageCharacter(ctx, cx, cy, s, customImg, anime, phase);
+      } else {
+        arDrawCharacter(ctx, cx, cy, s, anime, char);
+      }
+    }
+
+    // 吹き出し
+    if (arBubbleOpacity > 0) {
+      arBubbleOpacity = Math.max(0, arBubbleOpacity - 0.006);
+      // 画像キャラは頭がより上にあるので吹き出し位置を調整
+      const hasCustomImg = AR_IMAGES[anime.id]?.complete && AR_IMAGES[anime.id]?.naturalWidth > 0;
+      arDrawBubble(ctx, cx, cy, s, arBubbleText, arBubbleOpacity, hasCustomImg);
+    }
+
+    arAnimId = requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+function arSayLine(spotId, animeId) {
+  const entry = AR_DIALOGUE[spotId] || AR_DIALOGUE[animeId];
+  const pool  = entry
+    ? (entry[currentLang] || entry.ja)
+    : ['…'];
+  const line = pool[Math.floor(Math.random() * pool.length)];
+  arBubbleText    = line;
+  arBubbleOpacity = 1;
+  arSpeakLine(line);
+}
+
+function arSpeakLine(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const langMap  = { ja: 'ja-JP', en: 'en-US', zh: 'zh-CN', ko: 'ko-KR' };
+  const langCode = langMap[currentLang] || 'ja-JP';
+  const utter    = new SpeechSynthesisUtterance(text);
+  utter.lang     = langCode;
+  utter.rate     = currentLang === 'ja' ? 0.92 : 1.0;
+  utter.pitch    = currentLang === 'ja' ? 1.25 : 1.1;
+  const voices   = window.speechSynthesis.getVoices();
+  const voice    = voices.find(v => v.lang === langCode)
+                || voices.find(v => v.lang.startsWith(langCode.split('-')[0]));
+  if (voice) utter.voice = voice;
+  window.speechSynthesis.speak(utter);
+}
+
+function arDrawBubble(ctx, cx, cy, s, text, opacity, isImageChar = false) {
+  if (!text || opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+
+  const fontSize = Math.max(12, s * 0.19);
+  ctx.font = `bold ${fontSize}px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif`;
+
+  // テキスト折り返し（最大幅 s*2）
+  const arCanvas = document.getElementById('ar-canvas');
+  const maxW = Math.min(arCanvas ? arCanvas.width * 0.8 : 300, s * 2.2);
+  const lines = arWrapText(ctx, text, maxW - s * 0.3);
+  const lineH = fontSize * 1.4;
+  const padX  = s * 0.22, padY = s * 0.18;
+  const bw = Math.min(maxW, ctx.measureText(text).width + padX * 2);
+  const bh = lines.length * lineH + padY * 2;
+  const bx = cx - bw / 2;
+  const charTop = isImageChar ? s * 2.8 * 0.82 : s * 1.72;
+  const by = cy - charTop - bh;
+
+  // 影
+  ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(0,0,0,0.25)';
+
+  // 背景
+  ctx.fillStyle = 'rgba(255,255,255,0.96)';
+  ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, fontSize * 0.55); ctx.fill();
+
+  // テール
+  ctx.beginPath();
+  ctx.moveTo(cx - s*0.08, by + bh);
+  ctx.lineTo(cx, cy - (isImageChar ? s * 2.8 * 0.7 : s * 1.58));
+  ctx.lineTo(cx + s*0.08, by + bh);
+  ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // テキスト
+  ctx.fillStyle = '#222';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((ln, i) => {
+    ctx.fillText(ln, cx, by + padY + lineH * i + lineH / 2);
+  });
+
+  ctx.restore();
+}
+
+function arWrapText(ctx, text, maxW) {
+  const words = text.split('');
+  const lines = []; let cur = '';
+  for (const ch of words) {
+    const test = cur + ch;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = ch; }
+    else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [text];
+}
+
+function arEaseElastic(t) {
+  if (t <= 0) return 0; if (t >= 1) return 1;
+  return Math.pow(2, -10*t) * Math.sin((t*10 - 0.75) * (2*Math.PI/3)) + 1;
+}
+
+function arDrawStar(ctx, x, y, r1, r2) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? r1 : r2;
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    i === 0 ? ctx.moveTo(x + r*Math.cos(a), y + r*Math.sin(a))
+            : ctx.lineTo(x + r*Math.cos(a), y + r*Math.sin(a));
+  }
+  ctx.closePath();
+}
+
+function arDrawImageCharacter(ctx, cx, cy, s, img, anime, phase) {
+  const ac = anime.color;
+  const h  = s * 2.8;
+  const w  = h * (img.naturalWidth / img.naturalHeight); // 190/482 ≈ 0.394
+  // 座標系: translate(cx+driftX, cy) 後の相対座標
+  const ix = -w / 2;   // 画像左端
+  const iy = -h * 0.82; // 画像上端（足元が y=0 付近に来るよう）
+
+  // --- アイドルスウェイ ---
+  const swayAngle = Math.sin(phase * 0.55) * 0.022;       // ±1.3°の揺れ
+  const driftX    = Math.sin(phase * 0.38) * s * 0.022;   // 水平ドリフト
+
+  ctx.save();
+  ctx.translate(cx + driftX, cy);
+  ctx.rotate(swayAngle);
+
+  // 地面の影
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(0, h * 0.09, w * 0.40, h * 0.04, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // --- ①全体を描画（グロー込み）---
+  const skirtY = h * 0.518; // スカート開始位置 (482px中 250px)
+  ctx.shadowBlur = 26; ctx.shadowColor = ac;
+  ctx.drawImage(img, ix, iy, w, h);
+  ctx.shadowBlur = 0;
+
+  // --- ②下半身をシア変形で上書き（スカート物理）---
+  // ウエストライン(y0)を軸にした水平シア: x' = x + skirtSway*(y - y0)
+  const skirtSway = Math.sin(phase * 1.15 + 0.6) * 0.038
+                  + (arGamma || 0) * 0.0022;
+  const y0 = iy + skirtY;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(ix - 20, iy + skirtY - 1, w + 40, h - skirtY + 10); ctx.clip();
+  ctx.globalCompositeOperation = 'source-atop'; // 既存ピクセルの上にのみ描画
+  ctx.transform(1, 0, skirtSway, 1, -skirtSway * y0, 0);
+  ctx.drawImage(img, ix, iy, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.restore();
+
+  // --- 名前プレート ---
+  ctx.shadowBlur = 10; ctx.shadowColor = ac;
+  ctx.fillStyle = 'rgba(0,0,0,.72)';
+  const pw = s*1.64, ph = s*0.45;
+  ctx.beginPath(); ctx.roundRect(-pw/2, h*0.10, pw, ph, s*0.1); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = ac;
+  ctx.font = `bold ${s*0.19}px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(animeTitle(anime), 0, h*0.10 + ph/2);
+
+  ctx.restore();
+}
+
+function arDrawCharacter(ctx, cx, cy, s, anime, char) {
+  const ac   = anime.color;
+  const hair = char.hair;
+  const skin = '#ffdab5';
+
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // Ground shadow
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(0, s*0.98, s*0.4, s*0.09, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // --- Skirt ---
+  ctx.shadowBlur = 22; ctx.shadowColor = ac;
+  ctx.fillStyle = ac;
+  ctx.beginPath();
+  ctx.moveTo(-s*0.28, s*0.10); ctx.lineTo(s*0.28, s*0.10);
+  ctx.lineTo(s*0.50, s*0.92);  ctx.lineTo(-s*0.50, s*0.92);
+  ctx.closePath(); ctx.fill();
+
+  // --- Torso ---
+  const tg = ctx.createLinearGradient(-s*0.22, -s*0.3, s*0.22, s*0.12);
+  tg.addColorStop(0, arLighten(ac, 35)); tg.addColorStop(1, ac);
+  ctx.fillStyle = tg;
+  ctx.beginPath(); ctx.roundRect(-s*0.22, -s*0.3, s*0.44, s*0.44, s*0.04); ctx.fill();
+
+  // --- Arms ---
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = ac; ctx.lineWidth = s*0.15; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-s*0.22, -s*0.12);
+  ctx.quadraticCurveTo(-s*0.58, s*0.20, -s*0.55, s*0.56); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(s*0.22, -s*0.12);
+  ctx.quadraticCurveTo(s*0.58, s*0.20, s*0.55, s*0.56); ctx.stroke();
+
+  // --- Legs ---
+  ctx.strokeStyle = '#777'; ctx.lineWidth = s*0.14;
+  ctx.beginPath(); ctx.moveTo(-s*0.17, s*0.90); ctx.lineTo(-s*0.17, s*1.18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(s*0.17, s*0.90);  ctx.lineTo(s*0.17, s*1.18);  ctx.stroke();
+  ctx.fillStyle = '#444';
+  ctx.beginPath(); ctx.ellipse(-s*0.17, s*1.20, s*0.14, s*0.07, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s*0.17, s*1.20, s*0.14, s*0.07, 0, 0, Math.PI*2); ctx.fill();
+
+  // --- Neck ---
+  ctx.fillStyle = skin; ctx.fillRect(-s*0.07, -s*0.38, s*0.14, s*0.13);
+
+  // --- Head ---
+  ctx.shadowBlur = 16; ctx.shadowColor = ac;
+  ctx.fillStyle = skin;
+  ctx.beginPath(); ctx.arc(0, -s*0.66, s*0.31, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // --- Hair ---
+  ctx.fillStyle = hair;
+  ctx.beginPath(); ctx.arc(0, -s*0.74, s*0.34, Math.PI, 0); ctx.fill();
+  // Bangs
+  ctx.beginPath();
+  ctx.moveTo(-s*0.34, -s*0.7);
+  ctx.quadraticCurveTo(-s*0.37, -s*0.52, -s*0.30, -s*0.44);
+  ctx.lineTo(-s*0.12, -s*0.44);
+  ctx.quadraticCurveTo(-s*0.06, -s*0.94, 0, -s*0.98);
+  ctx.quadraticCurveTo(s*0.06, -s*0.94, s*0.12, -s*0.44);
+  ctx.lineTo(s*0.30, -s*0.44);
+  ctx.quadraticCurveTo(s*0.37, -s*0.52, s*0.34, -s*0.7);
+  ctx.fill();
+  // Side strands
+  ctx.beginPath(); ctx.ellipse(-s*0.33, -s*0.60, s*0.11, s*0.26, -0.25, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s*0.33, -s*0.60, s*0.11, s*0.26, 0.25, 0, Math.PI*2); ctx.fill();
+
+  // --- Eyes ---
+  ctx.fillStyle = 'white';
+  ctx.beginPath(); ctx.ellipse(-s*0.11, -s*0.64, s*0.085, s*0.105, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s*0.11, -s*0.64, s*0.085, s*0.105, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = ac;
+  ctx.beginPath(); ctx.ellipse(-s*0.11, -s*0.64, s*0.065, s*0.085, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s*0.11, -s*0.64, s*0.065, s*0.085, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(-s*0.11, -s*0.64, s*0.038, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s*0.11, -s*0.64, s*0.038, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.beginPath(); ctx.arc(-s*0.088, -s*0.667, s*0.019, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s*0.132, -s*0.667, s*0.019, 0, Math.PI*2); ctx.fill();
+
+  // --- Blush ---
+  ctx.globalAlpha = 0.32;
+  ctx.fillStyle = '#ff8888';
+  ctx.beginPath(); ctx.ellipse(-s*0.22, -s*0.57, s*0.1, s*0.045, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s*0.22, -s*0.57, s*0.1, s*0.045, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // --- Mouth ---
+  ctx.strokeStyle = '#d08060'; ctx.lineWidth = s*0.024; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(0, -s*0.52, s*0.058, 0.18, Math.PI-0.18); ctx.stroke();
+
+  // --- Accessory ---
+  arDrawAccessory(ctx, char.item, ac, s);
+
+  // --- Name plate ---
+  ctx.shadowBlur = 12; ctx.shadowColor = ac;
+  ctx.fillStyle = 'rgba(0,0,0,.7)';
+  ctx.beginPath(); ctx.roundRect(-s*0.82, s*1.32, s*1.64, s*0.45, s*0.1); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = ac;
+  ctx.font = `bold ${s*0.19}px 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(animeTitle(anime), 0, s*1.545);
+
+  ctx.restore();
+}
+
+function arDrawAccessory(ctx, item, ac, s) {
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  switch (item) {
+    case 'cord':
+      ctx.strokeStyle = '#ff6b9d'; ctx.lineWidth = s*0.038; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(s*0.55, s*0.48);
+      ctx.bezierCurveTo(s*0.78, s*0.28, s*0.98, s*0.48, s*0.90, s*0.75); ctx.stroke();
+      ctx.shadowBlur = 10; ctx.shadowColor = '#ff6b9d';
+      ctx.fillStyle = '#ff6b9d';
+      ctx.beginPath(); ctx.arc(s*0.90, s*0.75, s*0.075, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+      break;
+    case 'flower':
+      for (let i = 0; i < 6; i++) {
+        const a = (i/6)*Math.PI*2;
+        ctx.fillStyle = ac;
+        ctx.beginPath(); ctx.ellipse(s*0.72+Math.cos(a)*s*0.14, s*0.28+Math.sin(a)*s*0.14, s*0.095, s*0.048, a, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle = '#fff176';
+      ctx.beginPath(); ctx.arc(s*0.72, s*0.28, s*0.095, 0, Math.PI*2); ctx.fill();
+      break;
+    case 'book':
+      ctx.shadowBlur = 6; ctx.shadowColor = ac;
+      ctx.fillStyle = ac;
+      ctx.beginPath(); ctx.roundRect(s*0.5, s*0.36, s*0.36, s*0.46, s*0.03); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,255,255,.28)'; ctx.fillRect(s*0.51, s*0.40, s*0.055, s*0.38);
+      ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = s*0.016;
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(s*0.57, s*(0.45+i*0.10)); ctx.lineTo(s*0.84, s*(0.45+i*0.10)); ctx.stroke(); }
+      break;
+    case 'helmet':
+      ctx.shadowBlur = 8; ctx.shadowColor = ac;
+      ctx.fillStyle = ac;
+      ctx.beginPath(); ctx.arc(0, -s*1.02, s*0.25, Math.PI, 0); ctx.fill();
+      ctx.fillRect(-s*0.25, -s*1.02, s*0.50, s*0.11);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-s*0.14, -s*0.98, s*0.28, s*0.08);
+      break;
+    case 'sunflower':
+      for (let i = 0; i < 8; i++) {
+        const a = (i/8)*Math.PI*2;
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath(); ctx.ellipse(s*0.68+Math.cos(a)*s*0.16, s*0.26+Math.sin(a)*s*0.16, s*0.095, s*0.048, a, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle = '#5c3d2e'; ctx.beginPath(); ctx.arc(s*0.68, s*0.26, s*0.11, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#886644'; ctx.beginPath(); ctx.arc(s*0.68, s*0.26, s*0.065, 0, Math.PI*2); ctx.fill();
+      break;
+    case 'lantern':
+      ctx.strokeStyle = '#999'; ctx.lineWidth = s*0.022;
+      ctx.beginPath(); ctx.moveTo(s*0.55, s*0.44); ctx.lineTo(s*0.64, s*0.52); ctx.stroke();
+      ctx.shadowBlur = 18; ctx.shadowColor = '#ff9900';
+      ctx.fillStyle = '#fffbe0';
+      ctx.beginPath(); ctx.roundRect(s*0.55, s*0.52, s*0.24, s*0.32, s*0.045); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,140,0,.42)';
+      ctx.beginPath(); ctx.arc(s*0.67, s*0.68, s*0.09, 0, Math.PI*2); ctx.fill();
+      break;
+    case 'note':
+      ctx.font = `bold ${s*0.46}px serif`;
+      ctx.fillStyle = ac; ctx.shadowBlur = 14; ctx.shadowColor = ac;
+      ctx.fillText('♪', s*0.72, s*0.24);
+      ctx.shadowBlur = 0;
+      break;
+    case 'star':
+      ctx.shadowBlur = 16; ctx.shadowColor = ac;
+      ctx.fillStyle = ac;
+      arDrawStar(ctx, s*0.72, s*0.24, s*0.22, s*0.10); ctx.fill();
+      ctx.shadowBlur = 0;
+      break;
+    case 'digital':
+      ctx.shadowBlur = 12; ctx.shadowColor = ac;
+      ctx.strokeStyle = ac; ctx.lineWidth = s*0.04;
+      ctx.beginPath(); ctx.roundRect(-s*0.46, -s*1.08, s*0.92, s*0.24, s*0.05); ctx.stroke();
+      ctx.fillStyle = 'rgba(0,80,255,.22)'; ctx.fill();
+      ctx.font = `bold ${s*0.14}px monospace`;
+      ctx.fillStyle = ac; ctx.fillText('OZ', 0, -s*0.94);
+      ctx.shadowBlur = 0;
+      break;
+  }
+  ctx.restore();
+}
+
+function arLighten(hex, amt) {
+  const n = parseInt(hex.replace('#',''), 16);
+  const r = Math.min(255, (n>>16) + amt);
+  const g = Math.min(255, ((n>>8)&0xff) + amt);
+  const b = Math.min(255, (n&0xff) + amt);
+  return `rgb(${r},${g},${b})`;
+}
+
+// ===================== NAVIGATION =====================
+function switchScreen(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+  document.querySelector(`[data-screen="${screenId}"]`)?.classList.add('active');
+  closeSheet();
+
+  if (screenId === 'map-screen') {
+    setTimeout(() => map?.invalidateSize(), 50);
+  } else if (screenId === 'anime-screen') {
+    renderAnimeScreen();
+  } else if (screenId === 'checkin-screen') {
+    renderCheckinScreen();
+  }
+}
+
+// ===================== TOAST =====================
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position:fixed;top:70px;left:50%;transform:translateX(-50%);
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:30px;padding:10px 20px;font-size:.88rem;font-weight:700;
+    color:var(--text);z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.5);
+    animation:fadeUp .3s ease;white-space:nowrap;
+  `;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+// ===================== BADGE (top bar) =====================
+function updateBadge() {
+  const v = visitedCount();
+  document.getElementById('visited-badge').textContent = v ? t('visitedBadge')(v, SPOTS.length) : '';
+}
+
+// ===================== SEARCH =====================
+document.getElementById('map-search').addEventListener('input', e => {
+  filterMarkers(activeFilter, e.target.value);
+});
+
+// ===================== EVENTS =====================
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchScreen(btn.dataset.screen));
+});
+document.getElementById('overlay').addEventListener('click', closeSheet);
+
+// ===================== INTRO SCREEN =====================
+let _introActive = false;
+let _introStep = 0;
+
+// ---- Birthday select population ----
+function populateBirthSelects() {
+  const lang = currentLang;
+  const yearSel  = document.getElementById('birth-year');
+  const monthSel = document.getElementById('birth-month');
+  const daySel   = document.getElementById('birth-day');
+  if (!yearSel || !monthSel || !daySel) return;
+
+  const savedY = yearSel.value, savedM = monthSel.value, savedD = daySel.value;
+  const curYear = new Date().getFullYear();
+
+  // Year
+  yearSel.innerHTML = '';
+  const yPh = document.createElement('option'); yPh.value=''; yPh.textContent=t('birthYearPh'); yearSel.appendChild(yPh);
+  for (let y = curYear - 5; y >= 1950; y--) {
+    const o = document.createElement('option'); o.value = y;
+    o.textContent = (lang==='ja'||lang==='zh') ? `${y}年` : lang==='ko' ? `${y}년` : `${y}`;
+    yearSel.appendChild(o);
+  }
+  if (savedY) yearSel.value = savedY;
+
+  // Month
+  const MONTHS = {
+    ja: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+    en: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+    zh: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+    ko: ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'],
+  };
+  monthSel.innerHTML = '';
+  const mPh = document.createElement('option'); mPh.value=''; mPh.textContent=t('birthMonthPh'); monthSel.appendChild(mPh);
+  (MONTHS[lang] || MONTHS.ja).forEach((name, i) => {
+    const o = document.createElement('option'); o.value = i+1; o.textContent = name; monthSel.appendChild(o);
+  });
+  if (savedM) monthSel.value = savedM;
+
+  // Day
+  daySel.innerHTML = '';
+  const dPh = document.createElement('option'); dPh.value=''; dPh.textContent=t('birthDayPh'); daySel.appendChild(dPh);
+  for (let d = 1; d <= 31; d++) {
+    const o = document.createElement('option'); o.value = d;
+    o.textContent = (lang==='ja'||lang==='zh') ? `${d}日` : lang==='ko' ? `${d}일` : `${d}`;
+    daySel.appendChild(o);
+  }
+  if (savedD) daySel.value = savedD;
+}
+
+// ---- Language selection ----
+function selectIntroLang(lang) {
+  setLang(lang);
+  document.querySelectorAll('.intro-lang-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+  // Update step labels
+  const langLabel  = document.getElementById('intro-lang-label');
+  if (langLabel)  langLabel.textContent  = t('introLangLabel');
+  const birthLabel = document.getElementById('intro-birth-label');
+  if (birthLabel) birthLabel.textContent = t('introBirthLabel');
+  const nickLabel  = document.getElementById('intro-nick-label');
+  if (nickLabel)  nickLabel.textContent  = t('introNickLabel');
+  const nickInput  = document.getElementById('intro-nickname');
+  if (nickInput)  nickInput.placeholder  = t('introNickPlaceholder');
+  // Update all next buttons
+  document.querySelectorAll('.intro-next-btn').forEach(btn => { btn.textContent = t('introNextBtn'); });
+  // Repopulate selects with new locale
+  populateBirthSelects();
+  // Sync main lang dropdown
+  const langSel = document.getElementById('lang-select');
+  if (langSel) langSel.value = lang;
+}
+
+// ---- Step navigation ----
+function introNextStep() {
+  const cur = document.getElementById(`intro-step-${_introStep}`);
+  if (cur) cur.classList.remove('active');
+  // Mark current dot as done
+  const dots = document.querySelectorAll('.intro-dot');
+  if (dots[_introStep]) { dots[_introStep].classList.remove('active'); dots[_introStep].classList.add('done'); }
+  _introStep++;
+  const next = document.getElementById(`intro-step-${_introStep}`);
+  if (next) next.classList.add('active');
+  if (dots[_introStep]) dots[_introStep].classList.add('active');
+  // On entering final step, refresh tagline + start button text
+  if (_introStep === 3) _updateIntroFinal();
+}
+
+// ---- Final step personalisation ----
+function _updateIntroFinal() {
+  const nick = (document.getElementById('intro-nickname')?.value || '').trim();
+  const TAGLINES = {
+    ja: nick ? `${nick}さん、あなたの<em>聖地巡礼</em>がいまここから始まる！`
+             : 'あなたの<em>聖地巡礼</em>が、いまここから始まる',
+    en: nick ? `${nick}, your <em>anime pilgrimage</em> starts here!`
+             : 'Your <em>anime pilgrimage</em> starts here',
+    zh: nick ? `${nick}，你的<em>圣地巡礼</em>从这里出发！`
+             : '你的<em>圣地巡礼</em>，从这里出发',
+    ko: nick ? `${nick}님, <em>성지순례</em>가 지금 여기서 시작됩니다!`
+             : '당신의 <em>성지순례</em>가 지금 여기서 시작됩니다',
+  };
+  const el = document.getElementById('intro-tagline-text');
+  if (el) el.innerHTML = TAGLINES[currentLang] || TAGLINES.ja;
+  const startBtn = document.getElementById('intro-start-btn');
+  if (startBtn) startBtn.textContent = t('introStartBtn');
+}
+
+// ---- Close / finish intro ----
+function closeIntro() {
+  _introActive = false;
+  // Save birthday
+  const y = document.getElementById('birth-year')?.value;
+  const m = document.getElementById('birth-month')?.value;
+  const d = document.getElementById('birth-day')?.value;
+  if (y && m && d) localStorage.setItem('seichi_birthday', `${y}-${m}-${d}`);
+  // Save nickname
+  const nick = (document.getElementById('intro-nickname')?.value || '').trim();
+  if (nick) localStorage.setItem('seichi_nickname', nick);
+  // Sync lang dropdown
+  const langSel = document.getElementById('lang-select');
+  if (langSel) langSel.value = currentLang;
+
+  // デモ画面をイントロの裏で先に表示（opacity:1）→ イントロが透けてもマップは見えない
+  const demo = document.getElementById('demo-screen');
+  if (demo) {
+    demo.style.transition = 'none';
+    demo.style.opacity = '1';
+    demo.style.display = 'flex';
+    demo.classList.add('step-0');
+  }
+
+  const screen = document.getElementById('intro-screen');
+  if (screen && screen.parentNode) screen.remove();
+}
+
+try {
+  (function startIntro() {
+    const canvas = document.getElementById('intro-particles');
+    if (!canvas) return;
+
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const c = canvas.getContext('2d');
+    const COLORS = ['#6c63ff','#ff6584','#ffd166','#55efc4','#74b9ff','#fd79a8','#43d9ad','#a29bfe','#e17055'];
+
+    function starPath(ctx, x, y, r) {
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const a = (i * 4 * Math.PI / 5) - Math.PI / 2;
+        const b = a + 2 * Math.PI / 5;
+        i === 0 ? ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a))
+                : ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+        ctx.lineTo(x + r * .38 * Math.cos(b), y + r * .38 * Math.sin(b));
+      }
+      ctx.closePath();
+    }
+
+    const pts = Array.from({length: 55}, (_, i) => ({
+      x: Math.random() * window.innerWidth,
+      y: window.innerHeight * (1 + Math.random()),
+      vx: (Math.random() - .5) * .55,
+      vy: -(0.5 + Math.random() * 1.6),
+      r:  2 + Math.random() * 4.5,
+      color: COLORS[i % COLORS.length],
+      op:  .35 + Math.random() * .55,
+      flicker: Math.random() * Math.PI * 2,
+      star: i % 3 !== 0,
+    }));
+
+    _introActive = true;
+    function draw() {
+      if (!_introActive) return;
+      c.clearRect(0, 0, canvas.width, canvas.height);
+      pts.forEach(p => {
+        p.x += p.vx; p.y += p.vy; p.flicker += .04;
+        if (p.y < -20) { p.y = canvas.height + 10; p.x = Math.random() * canvas.width; }
+        const alpha = p.op * (.6 + .4 * Math.sin(p.flicker));
+        c.globalAlpha = alpha;
+        c.fillStyle = p.color;
+        c.shadowBlur = 10; c.shadowColor = p.color;
+        if (p.star) { starPath(c, p.x, p.y, p.r); c.fill(); }
+        else { c.beginPath(); c.arc(p.x, p.y, p.r * .65, 0, Math.PI * 2); c.fill(); }
+      });
+      c.globalAlpha = 1; c.shadowBlur = 0;
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    // Populate birthday selects on load
+    populateBirthSelects();
+
+    // アニメアイコンを時差でポップイン（step 3 に追加）
+    const row = document.getElementById('intro-icons-row');
+    if (row) {
+      ANIME.forEach((a, i) => {
+        const span = document.createElement('span');
+        span.className = 'intro-icon';
+        span.textContent = a.icon;
+        span.style.animationDelay = `${.5 + i * .09}s`;
+        row.appendChild(span);
+      });
+    }
+  })();
+} catch(e) {
+  console.warn('Intro animation error (non-fatal):', e);
+}
+
+// ===================== DEMO SCREEN =====================
+let _demoStep = 0;
+
+function showDemoScreen() {
+  const demo = document.getElementById('demo-screen');
+  if (!demo) return;
+  demo.style.opacity = '0';
+  demo.style.display = 'flex';
+  demo.classList.add('step-0');
+  requestAnimationFrame(() => {
+    demo.style.transition = 'opacity .6s ease';
+    demo.style.opacity = '1';
+  });
+}
+
+function demoSetStep(n) {
+  const demo = document.getElementById('demo-screen');
+  if (!demo) return;
+  demo.classList.remove('step-0', 'step-1', 'step-2');
+  demo.classList.add(`step-${n}`);
+  document.querySelectorAll('.demo-step').forEach((el, i) => {
+    el.classList.toggle('active', i === n);
+  });
+  _demoStep = n;
+}
+
+function demoNext() { demoSetStep(_demoStep + 1); }
+
+function demoLaunchAR() {
+  const overlay = document.getElementById('demo-ar-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  const video = document.getElementById('demo-ar-video');
+  if (navigator.mediaDevices?.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    }).then(stream => {
+      video.srcObject = stream;
+      video._stream = stream;
+    }).catch(() => {
+      video.style.display = 'none'; // カメラ不可でもみつはは表示される
+    });
+  } else {
+    video.style.display = 'none';
+  }
+}
+
+function demoCapture() {
+  const flash = document.getElementById('demo-ar-flash');
+  if (flash) {
+    flash.classList.add('on');
+    setTimeout(() => flash.classList.remove('on'), 200);
+  }
+  setTimeout(() => {
+    // カメラ停止
+    const video = document.getElementById('demo-ar-video');
+    if (video?._stream) {
+      video._stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    video.style.display = '';
+    const overlay = document.getElementById('demo-ar-overlay');
+    if (overlay) overlay.style.display = 'none';
+    demoSetStep(2);
+  }, 380);
+}
+
+function closeDemo() {
+  const demo = document.getElementById('demo-screen');
+  if (!demo) return;
+  demo.classList.add('fade-out');
+  setTimeout(() => { if (demo.parentNode) demo.remove(); }, 700);
+}
+
+// ===================== INIT =====================
+loadCheckins();
+updateBadge();
+buildFilterChips();
+initMap();
+</script>
+</body>
+</html>
